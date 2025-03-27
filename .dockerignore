@@ -1,0 +1,55 @@
+# Arquivos Git
+.git/
+.gitignore
+
+# Arquivos específicos do ambiente
+.env
+*.env
+.env.*
+!.env.example
+
+# Caches e arquivos temporários
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+.cursor/
+
+# Diretórios de dados e logs (montados como volumes)
+data/
+logs/
+!data/.gitkeep
+!logs/.gitkeep
+
+# Diretórios de ambiente virtual
+venv/
+env/
+ENV/
+
+# IDE e editores
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Arquivos Docker (desnecessários dentro da imagem)
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Documentação
+README.md
+LICENSE
+*.md
+
+# Outros
+.DS_Store
+Thumbs.db
