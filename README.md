@@ -1,6 +1,6 @@
 # Team Analysis Discord Bot
 
-Um bot do Discord para análise e gerenciamento de times de desenvolvimento com foco em stand-ups assíncronos e controle de ponto.
+Um bot do Discord para análise e gerenciamento de times de desenvolvimento com foco em atualizações de status assíncronos e controle de ponto.
 
 ## Funcionalidades
 
