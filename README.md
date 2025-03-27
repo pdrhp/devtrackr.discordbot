@@ -1,4 +1,4 @@
-# Team Analysis Discord Bot
+# devtrackr.discordbot
 
 Um bot do Discord para análise e gerenciamento de times de desenvolvimento com foco em atualizações de status assíncronos e controle de ponto.
 
