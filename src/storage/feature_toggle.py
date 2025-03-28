@@ -12,6 +12,8 @@ os.makedirs(os.path.dirname(FEATURE_TOGGLE_FILE), exist_ok=True)
 
 DEFAULT_FEATURES = {
     "ponto": False,
+    "daily": True,
+    "daily_collection": True,
 }
 
 

@@ -8,8 +8,9 @@ from discord.ext import tasks, commands
 from discord import app_commands
 
 from src.storage.daily import get_missing_updates
-from src.utils.config import get_env, get_br_time, to_br_timezone, BRAZIL_TIMEZONE
+from src.utils.config import get_env, get_br_time, to_br_timezone, BRAZIL_TIMEZONE, log_command
 from src.storage.users import check_user_is_po
+from src.storage.feature_toggle import is_feature_enabled
 
 logger = logging.getLogger('team_analysis_bot')
 
@@ -53,12 +54,45 @@ class ScheduledTasks(commands.Cog):
         """Chamado quando o cog é descarregado."""
         self.daily_reminder.cancel()
 
+    async def _check_daily_collection_enabled(self, interaction: Optional[discord.Interaction] = None) -> bool:
+        """
+        Verifica se as funcionalidades de daily e cobrança estão ativadas.
+
+        Args:
+            interaction: Interação opcional do Discord para enviar mensagem de erro.
+        """
+        if not is_feature_enabled("daily"):
+            if interaction:
+                await interaction.response.send_message(
+                    "⚠️ A funcionalidade de atualizações diárias está desativada. "
+                    "Você pode ativá-la com o comando `/toggle funcionalidade=daily`.",
+                    ephemeral=True
+                )
+                log_command("INFO", interaction.user, interaction.command.name, "Funcionalidade de daily desativada")
+            return False
+
+        if not is_feature_enabled("daily_collection"):
+            if interaction:
+                await interaction.response.send_message(
+                    "⚠️ A funcionalidade de cobrança de daily está desativada. "
+                    "Você pode ativá-la com o comando `/toggle funcionalidade=daily_collection`.",
+                    ephemeral=True
+                )
+                log_command("INFO", interaction.user, interaction.command.name, "Funcionalidade de cobrança de daily desativada")
+            return False
+
+        return True
+
     @tasks.loop(time=time(13, 0))
     async def daily_reminder(self):
         """Envia lembretes para usuários que não enviaram atualizações diárias."""
         logger.info("Executando tarefa de lembretes de atualizações diárias")
 
         try:
+            if not await self._check_daily_collection_enabled():
+                logger.info("Funcionalidade de cobrança de daily está desativada, pulando lembretes")
+                return
+
             br_time = get_br_time()
             if br_time.weekday() >= 5:
                 logger.info("Hoje é fim de semana, pulando lembretes de atualizações diárias")
@@ -217,6 +251,9 @@ class ScheduledTasks(commands.Cog):
     @app_commands.command(name="cobrar_daily", description="Cobra as atualizações diárias pendentes. (Somente POs e Admins)")
     async def cobrar_daily(self, interaction: discord.Interaction):
         """Comando para POs e admins cobrarem atualizações diárias pendentes."""
+        if not await self._check_daily_collection_enabled(interaction):
+            return
+
         daily_channel_id = get_env("DAILY_CHANNEL_ID")
 
         if daily_channel_id and str(interaction.channel_id) != daily_channel_id:

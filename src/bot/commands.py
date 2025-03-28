@@ -25,6 +25,8 @@ class AdminCommands(commands.Cog):
     @app_commands.describe(funcionalidade="Funcionalidade para ativar/desativar")
     @app_commands.choices(funcionalidade=[
         app_commands.Choice(name="Sistema de ponto", value="ponto"),
+        app_commands.Choice(name="Sistema de daily", value="daily"),
+        app_commands.Choice(name="Cobrança de daily", value="daily_collection"),
     ])
     async def toggle_feature(
         self,
@@ -850,6 +852,17 @@ class DailyCommands(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
+    async def _check_daily_enabled(self, interaction: discord.Interaction) -> bool:
+        """Verifica se a funcionalidade de daily está ativada."""
+        if not is_feature_enabled("daily"):
+            await interaction.response.send_message(
+                "⚠️ A funcionalidade de atualizações diárias está temporariamente desativada.",
+                ephemeral=True
+            )
+            log_command("INFO", interaction.user, interaction.command.name, "Funcionalidade desativada")
+            return False
+        return True
+
     @app_commands.command(name="daily", description="Envia ou atualiza sua atualização diária")
     @app_commands.describe(data="Data opcional no formato YYYY-MM-DD (padrão: dia anterior)")
     async def daily_update(
@@ -864,6 +877,9 @@ class DailyCommands(commands.Cog):
             interaction: A interação do Discord.
             data: Data opcional no formato YYYY-MM-DD.
         """
+        if not await self._check_daily_enabled(interaction):
+            return
+
         user_id = str(interaction.user.id)
         user = get_user(user_id)
 
@@ -960,6 +976,9 @@ class DailyCommands(commands.Cog):
             interaction: A interação do Discord.
             periodo: Período para visualizar.
         """
+        if not await self._check_daily_enabled(interaction):
+            return
+
         user_id = str(interaction.user.id)
 
         user = get_user(user_id)
