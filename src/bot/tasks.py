@@ -11,6 +11,7 @@ from src.storage.daily import get_missing_updates
 from src.utils.config import get_env, get_br_time, to_br_timezone, BRAZIL_TIMEZONE, log_command
 from src.storage.users import check_user_is_po
 from src.storage.feature_toggle import is_feature_enabled
+from src.storage.ignored_dates import should_ignore_date, get_all_ignored_dates
 
 logger = logging.getLogger('team_analysis_bot')
 
@@ -94,8 +95,18 @@ class ScheduledTasks(commands.Cog):
                 return
 
             br_time = get_br_time()
+
             if br_time.weekday() >= 5:
                 logger.info("Hoje é fim de semana, pulando lembretes de atualizações diárias")
+                return
+
+            if should_ignore_date(br_time):
+                logger.info(f"Data {br_time.strftime('%Y-%m-%d')} está na lista de datas ignoradas, pulando lembretes")
+                return
+
+            yesterday = br_time - timedelta(days=1)
+            if should_ignore_date(yesterday):
+                logger.info(f"Data {yesterday.strftime('%Y-%m-%d')} está na lista de datas ignoradas, pulando lembretes")
                 return
 
             missing_users = get_missing_updates()
@@ -252,6 +263,24 @@ class ScheduledTasks(commands.Cog):
     async def cobrar_daily(self, interaction: discord.Interaction):
         """Comando para POs e admins cobrarem atualizações diárias pendentes."""
         if not await self._check_daily_collection_enabled(interaction):
+            return
+
+        br_time = get_br_time()
+        if should_ignore_date(br_time):
+            await interaction.response.send_message(
+                f"⚠️ A data atual ({br_time.strftime('%d/%m/%Y')}) está configurada para ser ignorada na cobrança de daily.",
+                ephemeral=True
+            )
+            log_command("INFO", interaction.user, "/cobrar_daily", f"Data {br_time.strftime('%Y-%m-%d')} ignorada")
+            return
+
+        yesterday = br_time - timedelta(days=1)
+        if should_ignore_date(yesterday):
+            await interaction.response.send_message(
+                f"⚠️ A data de ontem ({yesterday.strftime('%d/%m/%Y')}) está configurada para ser ignorada na cobrança de daily.",
+                ephemeral=True
+            )
+            log_command("INFO", interaction.user, "/cobrar_daily", f"Data {yesterday.strftime('%Y-%m-%d')} ignorada")
             return
 
         daily_channel_id = get_env("DAILY_CHANNEL_ID")

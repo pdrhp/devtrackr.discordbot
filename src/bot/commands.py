@@ -1,6 +1,7 @@
 from typing import Optional
 from datetime import datetime, timedelta
 import os
+import logging
 
 import discord
 from discord import app_commands, ui
@@ -14,6 +15,83 @@ from src.storage.time_tracking import clock_in, clock_out, get_user_records, get
 from src.storage.users import register_user, get_user, get_users_by_role, remove_user
 from src.storage.daily import submit_daily_update, get_user_daily_updates, get_all_daily_updates, get_missing_updates, clear_all_daily_updates, has_submitted_daily_update
 from src.utils.config import get_env, get_br_time, to_br_timezone, BRAZIL_TIMEZONE, log_command, TIME_TRACKING_CHANNEL_ID
+from src.storage.ignored_dates import add_ignored_date, get_all_ignored_dates, remove_ignored_date, parse_date_config, should_ignore_date
+
+
+class DateConfigModal(ui.Modal, title="Configurar Datas Ignoradas - Cobrança Daily"):
+    """Modal para configurar datas ignoradas para cobrança de daily."""
+
+    dates_config = ui.TextInput(
+        label="Datas a ignorar",
+        style=discord.TextStyle.paragraph,
+        placeholder="Formatos: 2023-12-25 (data única), 2023-12-24-2024-01-03 (intervalo)",
+        required=False
+    )
+
+    def __init__(self, bot):
+        super().__init__(timeout=None)
+        self.bot = bot
+
+    async def on_submit(self, interaction: discord.Interaction):
+        """Processa o envio do modal."""
+        await interaction.response.defer(ephemeral=True, thinking=True)
+
+        try:
+            date_pairs = parse_date_config(self.dates_config.value)
+
+            if not date_pairs:
+                await interaction.followup.send(
+                    "⚠️ Nenhuma data válida foi configurada. Por favor, verifique o formato e tente novamente.",
+                    ephemeral=True
+                )
+                log_command("ERRO", interaction.user, "/config daily_collection", "Formato de data inválido")
+                return
+
+            existing_dates = get_all_ignored_dates()
+            for date_entry in existing_dates:
+                remove_ignored_date(date_entry["id"])
+
+            success_count = 0
+            for start_date, end_date in date_pairs:
+                if add_ignored_date(start_date, end_date, str(interaction.user.id)):
+                    success_count += 1
+
+            formatted_dates = []
+            for start_date, end_date in date_pairs:
+                if start_date == end_date:
+                    date_obj = datetime.strptime(start_date, "%Y-%m-%d")
+                    formatted_dates.append(f"• {date_obj.strftime('%d/%m/%Y')}")
+                else:
+                    start_obj = datetime.strptime(start_date, "%Y-%m-%d")
+                    end_obj = datetime.strptime(end_date, "%Y-%m-%d")
+                    formatted_dates.append(f"• {start_obj.strftime('%d/%m/%Y')} até {end_obj.strftime('%d/%m/%Y')}")
+
+            embed = discord.Embed(
+                title="✅ Configuração de Datas Ignoradas",
+                description=f"Foram configuradas {success_count} entradas de datas para serem ignoradas na cobrança de daily.",
+                color=discord.Color.green()
+            )
+
+            if formatted_dates:
+                embed.add_field(
+                    name="📅 Datas configuradas:",
+                    value="\n".join(formatted_dates),
+                    inline=False
+                )
+
+            embed.set_footer(text=f"Configurado por: {interaction.user.display_name} • {get_br_time().strftime('%d/%m/%Y %H:%M:%S')}")
+
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            log_command("INFO", interaction.user, "/config daily_collection", f"Configuradas {success_count} datas ignoradas")
+
+        except Exception as e:
+            logger = logging.getLogger('team_analysis_bot')
+            logger.error(f"Erro ao processar o modal de configuração: {str(e)}")
+            await interaction.followup.send(
+                f"❌ Ocorreu um erro ao processar a configuração: {str(e)}",
+                ephemeral=True
+            )
+            log_command("ERRO", interaction.user, "/config daily_collection", f"Erro: {str(e)}")
 
 
 class AdminCommands(commands.Cog):
@@ -421,6 +499,322 @@ class AdminCommands(commands.Cog):
             log_command("ERRO", interaction.user, f"/remover usuario={usuario.name}",
                        f"Erro: {message}")
 
+    @app_commands.command(name="config", description="Configura opções do bot")
+    @app_commands.describe(
+        funcionalidade="Funcionalidade a ser configurada"
+    )
+    @app_commands.choices(funcionalidade=[
+        app_commands.Choice(name="Cobrança de Daily", value="daily_collection")
+    ])
+    async def config(
+        self,
+        interaction: discord.Interaction,
+        funcionalidade: str
+    ):
+        """
+        Configura opções do bot.
+
+        Args:
+            interaction: A interação do Discord.
+            funcionalidade: A funcionalidade a ser configurada.
+        """
+        admin_role_id = int(get_env("ADMIN_ROLE_ID"))
+        has_permission = False
+
+        if admin_role_id == 0:
+            has_permission = interaction.user.guild_permissions.administrator
+        else:
+            has_permission = any(role.id == admin_role_id for role in interaction.user.roles)
+
+        user = get_user(str(interaction.user.id))
+        if user and user['role'] == 'po':
+            has_permission = True
+
+        if not has_permission:
+            await interaction.response.send_message(
+                "⚠️ Você não tem permissão para usar este comando. Apenas administradores e Product Owners podem configurar o bot.",
+                ephemeral=True
+            )
+            log_command("PERMISSÃO NEGADA", interaction.user, f"/config funcionalidade={funcionalidade}")
+            return
+
+        if funcionalidade == "daily_collection":
+            if not is_feature_enabled("daily"):
+                await interaction.response.send_message(
+                    "⚠️ A funcionalidade de daily está desativada. "
+                    "Você precisa ativá-la primeiro com o comando `/toggle funcionalidade=daily`.",
+                    ephemeral=True
+                )
+                log_command("ERRO", interaction.user, f"/config funcionalidade={funcionalidade}", "Funcionalidade de daily desativada")
+                return
+
+            if not is_feature_enabled("daily_collection"):
+                await interaction.response.send_message(
+                    "⚠️ A funcionalidade de cobrança de daily está desativada. "
+                    "Você precisa ativá-la primeiro com o comando `/toggle funcionalidade=daily_collection`.",
+                    ephemeral=True
+                )
+                log_command("ERRO", interaction.user, f"/config funcionalidade={funcionalidade}", "Funcionalidade de cobrança de daily desativada")
+                return
+
+            embed = discord.Embed(
+                title="⚙️ Configurações - Cobrança de Daily",
+                description="Escolha uma das opções abaixo para configurar:",
+                color=discord.Color.blue()
+            )
+
+            embed.add_field(
+                name="📅 Datas Ignoradas",
+                value="Configure quais datas devem ser ignoradas na cobrança de daily. "
+                      "Útil para feriados, recessos e outros períodos sem trabalho.",
+                inline=False
+            )
+
+            embed.add_field(
+                name="ℹ️ Formatos de Data Aceitos",
+                value="• Data única: `2023-12-25`\n"
+                      "• Múltiplas datas: `2023-12-25,2023-12-26`\n"
+                      "• Intervalo de datas: `2023-12-24-2024-01-03`",
+                inline=False
+            )
+
+            view = ConfigView(self.bot, funcionalidade)
+            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+            log_command("INFO", interaction.user, f"/config funcionalidade={funcionalidade}", "Menu de opções de configuração exibido")
+        else:
+            await interaction.response.send_message(
+                f"⚠️ A funcionalidade '{funcionalidade}' não possui opções de configuração ainda.",
+                ephemeral=True
+            )
+            log_command("ERRO", interaction.user, f"/config funcionalidade={funcionalidade}", "Funcionalidade sem opções de configuração")
+
+    @app_commands.command(name="remover-data-ignorada", description="Remove uma configuração de data ignorada na cobrança de daily")
+    @app_commands.describe(
+        id="ID da configuração de data a ser removida"
+    )
+    async def remove_ignored_date(
+        self,
+        interaction: discord.Interaction,
+        id: int
+    ):
+        """
+        Remove uma configuração de data ignorada na cobrança de daily.
+
+        Args:
+            interaction: A interação do Discord.
+            id: ID da configuração a ser removida.
+        """
+        admin_role_id = int(get_env("ADMIN_ROLE_ID"))
+        has_permission = False
+
+        if admin_role_id == 0:
+            has_permission = interaction.user.guild_permissions.administrator
+        else:
+            has_permission = any(role.id == admin_role_id for role in interaction.user.roles)
+
+        user = get_user(str(interaction.user.id))
+        if user and user['role'] == 'po':
+            has_permission = True
+
+        if not has_permission:
+            await interaction.response.send_message(
+                "⚠️ Você não tem permissão para usar este comando. Apenas administradores e Product Owners podem remover datas ignoradas.",
+                ephemeral=True
+            )
+            log_command("PERMISSÃO NEGADA", interaction.user, f"/remover-data-ignorada id={id}")
+            return
+
+        if not is_feature_enabled("daily") or not is_feature_enabled("daily_collection"):
+            await interaction.response.send_message(
+                "⚠️ As funcionalidades de daily ou cobrança de daily estão desativadas.",
+                ephemeral=True
+            )
+            log_command("ERRO", interaction.user, f"/remover-data-ignorada id={id}", "Funcionalidades desativadas")
+            return
+
+        ignored_dates = get_all_ignored_dates()
+        date_to_remove = None
+
+        for date in ignored_dates:
+            if date["id"] == id:
+                date_to_remove = date
+                break
+
+        if not date_to_remove:
+            await interaction.response.send_message(
+                f"⚠️ Não foi encontrada configuração de data ignorada com o ID {id}.",
+                ephemeral=True
+            )
+            log_command("ERRO", interaction.user, f"/remover-data-ignorada id={id}", "ID não encontrado")
+            return
+
+        if remove_ignored_date(id):
+            start_date = datetime.strptime(date_to_remove["start_date"], "%Y-%m-%d")
+            end_date = datetime.strptime(date_to_remove["end_date"], "%Y-%m-%d")
+
+            start_date_str = start_date.strftime("%d/%m/%Y")
+            end_date_str = end_date.strftime("%d/%m/%Y")
+
+            if start_date == end_date:
+                date_desc = f"**{start_date_str}**"
+            else:
+                date_desc = f"de **{start_date_str}** até **{end_date_str}**"
+
+            await interaction.response.send_message(
+                f"✅ Configuração de data ignorada {date_desc} (ID: {id}) foi removida com sucesso.",
+                ephemeral=True
+            )
+            log_command("INFO", interaction.user, f"/remover-data-ignorada id={id}", "Data removida com sucesso")
+        else:
+            await interaction.response.send_message(
+                f"❌ Ocorreu um erro ao tentar remover a configuração de data ignorada com ID {id}.",
+                ephemeral=True
+            )
+            log_command("ERRO", interaction.user, f"/remover-data-ignorada id={id}", "Erro ao remover")
+
+    @app_commands.command(name="listar-datas-ignoradas", description="Lista as datas configuradas para serem ignoradas na cobrança de daily")
+    async def list_ignored_dates(self, interaction: discord.Interaction):
+        """
+        Lista as datas configuradas para serem ignoradas na cobrança de daily.
+
+        Args:
+            interaction: A interação do Discord.
+        """
+        admin_role_id = int(get_env("ADMIN_ROLE_ID"))
+        has_permission = False
+
+        if admin_role_id == 0:
+            has_permission = interaction.user.guild_permissions.administrator
+        else:
+            has_permission = any(role.id == admin_role_id for role in interaction.user.roles)
+
+        user = get_user(str(interaction.user.id))
+        if user and user['role'] == 'po':
+            has_permission = True
+
+        if not has_permission:
+            await interaction.response.send_message(
+                "⚠️ Você não tem permissão para usar este comando. Apenas administradores e Product Owners podem ver as datas ignoradas.",
+                ephemeral=True
+            )
+            log_command("PERMISSÃO NEGADA", interaction.user, "/listar-datas-ignoradas")
+            return
+
+        if not is_feature_enabled("daily") or not is_feature_enabled("daily_collection"):
+            await interaction.response.send_message(
+                "⚠️ As funcionalidades de daily ou cobrança de daily estão desativadas.",
+                ephemeral=True
+            )
+            log_command("ERRO", interaction.user, "/listar-datas-ignoradas", "Funcionalidades desativadas")
+            return
+
+        ignored_dates = get_all_ignored_dates()
+
+        if not ignored_dates:
+            await interaction.response.send_message(
+                "📅 Não há datas configuradas para serem ignoradas na cobrança de daily.",
+                ephemeral=True
+            )
+            log_command("INFO", interaction.user, "/listar-datas-ignoradas", "Nenhuma data configurada")
+            return
+
+        embed = discord.Embed(
+            title="📅 Datas Ignoradas - Cobrança de Daily",
+            description="Estas são as datas configuradas para serem ignoradas na cobrança de daily:",
+            color=discord.Color.blue()
+        )
+
+        for date_entry in ignored_dates:
+            start_date = datetime.strptime(date_entry["start_date"], "%Y-%m-%d")
+            end_date = datetime.strptime(date_entry["end_date"], "%Y-%m-%d")
+            created_at = datetime.strptime(date_entry["created_at"], "%Y-%m-%d %H:%M:%S")
+
+            start_date_str = start_date.strftime("%d/%m/%Y")
+            end_date_str = end_date.strftime("%d/%m/%Y")
+            created_at_str = created_at.strftime("%d/%m/%Y %H:%M:%S")
+
+            if start_date == end_date:
+                date_desc = f"📆 **{start_date_str}**"
+            else:
+                date_desc = f"📆 De **{start_date_str}** até **{end_date_str}**"
+
+            try:
+                creator_user = await self.bot.fetch_user(int(date_entry["created_by"]))
+                creator_name = creator_user.display_name
+            except:
+                creator_name = f"Usuário {date_entry['created_by']}"
+
+            embed.add_field(
+                name=f"ID: {date_entry['id']} - {date_desc}",
+                value=f"Configurado por: {creator_name} em {created_at_str}",
+                inline=False
+            )
+
+        embed.set_footer(text=f"Total: {len(ignored_dates)} configurações • ID pode ser usado com /remover-data-ignorada")
+
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        log_command("CONSULTA", interaction.user, "/listar-datas-ignoradas", f"Listadas {len(ignored_dates)} configurações")
+
+    @app_commands.command(name="testar-datas-ignoradas", description="Testa se uma data específica está configurada para ser ignorada")
+    @app_commands.describe(
+        data="Data para testar no formato YYYY-MM-DD"
+    )
+    async def test_ignored_date(
+        self,
+        interaction: discord.Interaction,
+        data: str
+    ):
+        """
+        Testa se uma data específica está configurada para ser ignorada na cobrança de daily.
+
+        Args:
+            interaction: A interação do Discord.
+            data: Data para testar.
+        """
+        admin_role_id = int(get_env("ADMIN_ROLE_ID"))
+        has_permission = False
+
+        if admin_role_id == 0:
+            has_permission = interaction.user.guild_permissions.administrator
+        else:
+            has_permission = any(role.id == admin_role_id for role in interaction.user.roles)
+
+        user = get_user(str(interaction.user.id))
+        if user and user['role'] == 'po':
+            has_permission = True
+
+        if not has_permission:
+            await interaction.response.send_message(
+                "⚠️ Você não tem permissão para usar este comando.",
+                ephemeral=True
+            )
+            log_command("PERMISSÃO NEGADA", interaction.user, f"/testar-datas-ignoradas data={data}")
+            return
+
+        try:
+            date_obj = datetime.strptime(data, "%Y-%m-%d")
+
+            is_ignored = should_ignore_date(date_obj)
+
+            if is_ignored:
+                await interaction.response.send_message(
+                    f"✅ A data **{date_obj.strftime('%d/%m/%Y')}** está configurada para ser ignorada na cobrança de daily.",
+                    ephemeral=True
+                )
+            else:
+                await interaction.response.send_message(
+                    f"ℹ️ A data **{date_obj.strftime('%d/%m/%Y')}** NÃO está configurada para ser ignorada na cobrança de daily.",
+                    ephemeral=True
+                )
+
+            log_command("INFO", interaction.user, f"/testar-datas-ignoradas data={data}", f"Resultado: {is_ignored}")
+        except ValueError:
+            await interaction.response.send_message(
+                f"⚠️ Formato de data inválido: {data}. Use o formato YYYY-MM-DD.",
+                ephemeral=True
+            )
+            log_command("ERRO", interaction.user, f"/testar-datas-ignoradas data={data}", "Formato de data inválido")
+
 
 class TimeTrackingCommands(commands.Cog):
 
@@ -548,112 +942,6 @@ class TimeTrackingCommands(commands.Cog):
             )
 
             log_command("ERRO", interaction.user, "/off", f"Erro: {message}")
-
-    @app_commands.command(name="horas", description="Mostra suas horas registradas no sistema de ponto")
-    @app_commands.describe(periodo="Período para visualizar (hoje, semana, mes)")
-    @app_commands.choices(periodo=[
-        app_commands.Choice(name="Hoje", value="hoje"),
-        app_commands.Choice(name="Esta semana", value="semana"),
-        app_commands.Choice(name="Este mês", value="mes")
-    ])
-    async def view_hours(
-        self,
-        interaction: discord.Interaction,
-        periodo: str = "hoje"
-    ):
-        """Comando para visualizar horas registradas."""
-        if not is_feature_enabled("ponto"):
-            await self.handle_disabled_feature(interaction)
-            return
-
-        if not await self.check_channel(interaction):
-            return
-
-        user_id = str(interaction.user.id)
-
-        today = get_br_time().replace(hour=0, minute=0, second=0, microsecond=0)
-
-        if periodo == "hoje":
-            start_date = today.strftime("%Y-%m-%d")
-            end_date = today.strftime("%Y-%m-%d")
-            periodo_texto = "hoje"
-        elif periodo == "semana":
-            start_date = (today - timedelta(days=today.weekday())).strftime("%Y-%m-%d")
-            end_date = today.strftime("%Y-%m-%d")
-            periodo_texto = "esta semana"
-        elif periodo == "mes":
-            start_date = today.replace(day=1).strftime("%Y-%m-%d")
-            end_date = today.strftime("%Y-%m-%d")
-            periodo_texto = "este mês"
-
-        records = get_user_records(user_id, start_date, end_date)
-
-        if not records:
-            await interaction.response.send_message(
-                f"Você não possui registros de ponto para {periodo_texto}.",
-                ephemeral=True
-            )
-            log_command("INFO", interaction.user, f"/horas periodo={periodo}", "Nenhum registro encontrado")
-            return
-
-        total_seconds = 0
-        records_text = []
-
-        for i, record in enumerate(records, 1):
-            clock_in_time = datetime.fromisoformat(record["clock_in"])
-            clock_in_time_br = to_br_timezone(clock_in_time) if clock_in_time.tzinfo else clock_in_time
-
-            if record["clock_out"] is None:
-                clock_out_str = "🟢 Em andamento"
-                duration_str = "Em andamento"
-                duration_seconds = 0
-            else:
-                clock_out_time = datetime.fromisoformat(record["clock_out"])
-                clock_out_time_br = to_br_timezone(clock_out_time) if clock_out_time.tzinfo else clock_out_time
-                duration = clock_out_time_br - clock_in_time_br
-                duration_seconds = duration.total_seconds()
-
-                hours, remainder = divmod(int(duration_seconds), 3600)
-                minutes, _ = divmod(remainder, 60)
-                duration_str = f"{hours}h {minutes}min"
-
-                clock_out_str = f"{clock_out_time_br.strftime('%H:%M:%S')}"
-
-                total_seconds += duration_seconds
-
-            day_date = clock_in_time_br.strftime("%d/%m/%Y")
-
-            record_text = [
-                f"**{day_date}** | Entrada: {clock_in_time_br.strftime('%H:%M:%S')} • "
-                f"Saída: {clock_out_str} • "
-                f"Duração: {duration_str}"
-            ]
-
-            if record.get("observation"):
-                record_text.append(f"📝 *{record['observation']}*")
-
-            records_text.append("\n".join(record_text))
-
-        total_hours, remainder = divmod(int(total_seconds), 3600)
-        total_minutes, _ = divmod(remainder, 60)
-
-        embed = discord.Embed(
-            title=f"📊 Registro de Horas - {periodo_texto.capitalize()}",
-            description=f"Total: **{total_hours}h {total_minutes}min**",
-            color=discord.Color.blue()
-        )
-
-        embed.add_field(
-            name="Registros",
-            value="\n\n".join(records_text) if records_text else "Nenhum registro encontrado.",
-            inline=False
-        )
-
-        embed.set_footer(text=f"Período: {start_date} a {end_date} (Horário de Brasília)")
-
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-        log_command("CONSULTA", interaction.user, f"/horas periodo={periodo}",
-                   f"Visualizados {len(records)} registros, total: {total_hours}h {total_minutes}min")
 
 
 class UserCommands(commands.Cog):
@@ -1166,7 +1454,7 @@ class DailyCommands(commands.Cog):
                 }
 
         sorted_updates = []
-        for user_id, updates in all_updates.items():
+        for user_id, updates in all_users.items():
             for update in updates:
                 sorted_updates.append({
                     'user_id': user_id,
@@ -1405,6 +1693,81 @@ class SupportCommands(commands.Cog):
         """
         log_command("COMANDO", interaction.user, "/suporte", "Iniciando modal de suporte")
         await interaction.response.send_modal(SupportModal())
+
+
+class ConfigView(ui.View):
+    """View com botões para escolher configurações do bot."""
+
+    def __init__(self, bot: commands.Bot, funcionalidade: str):
+        super().__init__(timeout=300)
+        self.bot = bot
+        self.funcionalidade = funcionalidade
+
+    @ui.button(label="Configurar Datas Ignoradas", style=discord.ButtonStyle.primary, emoji="📅")
+    async def ignored_dates_button(self, interaction: discord.Interaction, button: ui.Button):
+        """Botão para configurar datas ignoradas na cobrança de daily."""
+        try:
+            modal = DateConfigModal(self.bot)
+            await interaction.response.send_modal(modal)
+            log_command("INFO", interaction.user, f"/config funcionalidade={self.funcionalidade}", "Modal de configuração de datas ignoradas aberto")
+        except Exception as e:
+            logger = logging.getLogger('team_analysis_bot')
+            logger.error(f"Erro ao abrir modal de configuração: {str(e)}")
+            await interaction.response.send_message(
+                f"❌ Ocorreu um erro ao abrir o modal de configuração: {str(e)}",
+                ephemeral=True
+            )
+            log_command("ERRO", interaction.user, f"/config funcionalidade={self.funcionalidade}", f"Erro ao abrir modal: {str(e)}")
+
+    @ui.button(label="Listar Datas Ignoradas", style=discord.ButtonStyle.secondary, emoji="📋")
+    async def list_ignored_dates_button(self, interaction: discord.Interaction, button: ui.Button):
+        """Botão para listar as datas ignoradas configuradas."""
+        ignored_dates = get_all_ignored_dates()
+
+        if not ignored_dates:
+            await interaction.response.send_message(
+                "📅 Não há datas configuradas para serem ignoradas na cobrança de daily.",
+                ephemeral=True
+            )
+            log_command("INFO", interaction.user, "/config listar-datas", "Nenhuma data configurada")
+            return
+
+        embed = discord.Embed(
+            title="📅 Datas Ignoradas - Cobrança de Daily",
+            description="Estas são as datas configuradas para serem ignoradas na cobrança de daily:",
+            color=discord.Color.blue()
+        )
+
+        for date_entry in ignored_dates:
+            start_date = datetime.strptime(date_entry["start_date"], "%Y-%m-%d")
+            end_date = datetime.strptime(date_entry["end_date"], "%Y-%m-%d")
+            created_at = datetime.strptime(date_entry["created_at"], "%Y-%m-%d %H:%M:%S")
+
+            start_date_str = start_date.strftime("%d/%m/%Y")
+            end_date_str = end_date.strftime("%d/%m/%Y")
+            created_at_str = created_at.strftime("%d/%m/%Y %H:%M:%S")
+
+            if start_date == end_date:
+                date_desc = f"📆 **{start_date_str}**"
+            else:
+                date_desc = f"📆 De **{start_date_str}** até **{end_date_str}**"
+
+            try:
+                creator_user = await self.bot.fetch_user(int(date_entry["created_by"]))
+                creator_name = creator_user.display_name
+            except:
+                creator_name = f"Usuário {date_entry['created_by']}"
+
+            embed.add_field(
+                name=f"ID: {date_entry['id']} - {date_desc}",
+                value=f"Configurado por: {creator_name} em {created_at_str}",
+                inline=False
+            )
+
+        embed.set_footer(text=f"Total: {len(ignored_dates)} configurações • ID pode ser usado com /remover-data-ignorada")
+
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        log_command("CONSULTA", interaction.user, "/config listar-datas", f"Listadas {len(ignored_dates)} configurações")
 
 
 async def setup(bot: commands.Bot):
