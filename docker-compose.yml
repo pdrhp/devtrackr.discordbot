@@ -1,0 +1,31 @@
+version: "3.8"
+
+services:
+  team-analysis-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: devtrackr.discordbot
+    restart: always
+    environment:
+      - DISCORD_TOKEN=${DISCORD_TOKEN}
+      - ADMIN_ROLE_ID=${ADMIN_ROLE_ID}
+      - DAILY_REMINDER_TIME=${DAILY_REMINDER_TIME}
+      - DAILY_CHANNEL_ID=${DAILY_CHANNEL_ID}
+      - TIME_TRACKING_CHANNEL_ID=${TIME_TRACKING_CHANNEL_ID}
+      - SUPPORT_USER_ID=${SUPPORT_USER_ID}
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import sys; sys.exit(0 if __import__('os').path.exists('/app/data/teamanalysis.db') else 1)",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
