@@ -1,6 +1,7 @@
 import sqlite3
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple, Any
+import logging
 
 from src.storage.database import get_connection
 from src.storage.users import get_user, get_users_by_role
@@ -118,6 +119,9 @@ def get_all_daily_updates(start_date: Optional[str] = None, end_date: Optional[s
     Returns:
         Dict[str, List[Dict[str, Any]]]: Dicionário com IDs dos usuários como chaves e listas de atualizações como valores.
     """
+    logger = logging.getLogger('team_analysis_commands')
+    logger.debug(f"[DEBUG] get_all_daily_updates: Iniciando busca para período {start_date} a {end_date}")
+
     conn = get_connection()
     cursor = conn.cursor()
 
@@ -141,8 +145,12 @@ def get_all_daily_updates(start_date: Optional[str] = None, end_date: Optional[s
 
         query += " ORDER BY user_id, report_date DESC"
 
+        logger.debug(f"[DEBUG] get_all_daily_updates: Executando query: {query} com params: {params}")
+
         cursor.execute(query, params)
         all_updates = cursor.fetchall()
+
+        logger.debug(f"[DEBUG] get_all_daily_updates: Recuperadas {len(all_updates)} atualizações do banco")
 
         results = {}
         for update in all_updates:
@@ -152,9 +160,15 @@ def get_all_daily_updates(start_date: Optional[str] = None, end_date: Optional[s
 
             results[user_id].append(dict(update))
 
+        logger.debug(f"[DEBUG] get_all_daily_updates: Organizadas atualizações para {len(results)} usuários")
+
+        for user_id, updates in results.items():
+            logger.debug(f"[DEBUG] get_all_daily_updates: Usuário {user_id} tem {len(updates)} atualizações")
+
         return results
 
-    except sqlite3.Error:
+    except sqlite3.Error as e:
+        logger.error(f"[DEBUG] get_all_daily_updates: Erro SQL: {str(e)}")
         return {}
 
     finally:

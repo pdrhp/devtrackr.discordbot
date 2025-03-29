@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, List, Tuple, Dict, Any
 from datetime import datetime, timedelta
 import os
 import logging
@@ -16,6 +16,9 @@ from src.storage.users import register_user, get_user, get_users_by_role, remove
 from src.storage.daily import submit_daily_update, get_user_daily_updates, get_all_daily_updates, get_missing_updates, clear_all_daily_updates, has_submitted_daily_update
 from src.utils.config import get_env, get_br_time, to_br_timezone, BRAZIL_TIMEZONE, log_command, TIME_TRACKING_CHANNEL_ID
 from src.storage.ignored_dates import add_ignored_date, get_all_ignored_dates, remove_ignored_date, parse_date_config, should_ignore_date
+
+command_logger = logging.getLogger('team_analysis_commands')
+command_logger.setLevel(logging.DEBUG)
 
 
 class DateConfigModal(ui.Modal, title="Configurar Datas Ignoradas - Cobrança Daily"):
@@ -1348,6 +1351,9 @@ class DailyCommands(commands.Cog):
             data_inicial: Data inicial no formato YYYY-MM-DD (padrão: 30 dias atrás).
             data_final: Data final no formato YYYY-MM-DD (padrão: hoje).
         """
+        logger = logging.getLogger('team_analysis_commands')
+        logger.debug(f"[DEBUG] Iniciando comando relatorio-daily: data_inicial={data_inicial}, data_final={data_final}")
+
         admin_role_id = int(get_env("ADMIN_ROLE_ID"))
         has_permission = False
 
@@ -1375,6 +1381,8 @@ class DailyCommands(commands.Cog):
         if data_inicial is None:
             data_inicial = (today - timedelta(days=30)).strftime("%Y-%m-%d")
 
+        logger.debug(f"[DEBUG] Datas calculadas: data_inicial={data_inicial}, data_final={data_final}")
+
         try:
             start_date_obj = datetime.strptime(data_inicial, "%Y-%m-%d")
             end_date_obj = datetime.strptime(data_final, "%Y-%m-%d")
@@ -1401,7 +1409,9 @@ class DailyCommands(commands.Cog):
         log_command("PROCESSANDO", interaction.user, f"/relatorio-daily data_inicial={data_inicial} data_final={data_final}",
                    "Iniciando geração do relatório")
 
+        logger.debug(f"[DEBUG] Buscando atualizações diárias no banco de dados...")
         all_updates = get_all_daily_updates(data_inicial, data_final)
+        logger.debug(f"[DEBUG] Quantidade de usuários com updates: {len(all_updates)}")
 
         if not all_updates:
             await interaction.followup.send(
@@ -1412,6 +1422,7 @@ class DailyCommands(commands.Cog):
                        "Nenhuma atualização encontrada")
             return
 
+        logger.debug(f"[DEBUG] Iniciando criação do workbook Excel...")
         wb = Workbook()
         ws = wb.active
         ws.title = "Relatório Daily"
@@ -1435,6 +1446,8 @@ class DailyCommands(commands.Cog):
             cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
             cell.border = border_all
 
+        logger.debug(f"[DEBUG] Cabeçalhos da planilha configurados")
+
         role_display = {
             "teammember": "Team Member",
             "po": "Product Owner"
@@ -1444,6 +1457,7 @@ class DailyCommands(commands.Cog):
         current_date = None
         use_alt_color = False
 
+        logger.debug(f"[DEBUG] Obtendo lista de todos os usuários")
         all_users = {}
         for role in ["teammember", "po"]:
             users = get_users_by_role(role)
@@ -1453,118 +1467,162 @@ class DailyCommands(commands.Cog):
                     "name": user["user_name"]
                 }
 
+        logger.debug(f"[DEBUG] Recuperados {len(all_users)} usuários no total")
+
+        logger.debug(f"[DEBUG] Organizando atualizações para o relatório")
         sorted_updates = []
-        for user_id, updates in all_users.items():
-            for update in updates:
-                sorted_updates.append({
-                    'user_id': user_id,
-                    'update': update
-                })
-
-        sorted_updates.sort(key=lambda x: x['update']['report_date'], reverse=True)
-
-        for item in sorted_updates:
-            user_id = item['user_id']
-            update = item['update']
-
-            date_obj = datetime.strptime(update['report_date'], "%Y-%m-%d")
-            date_obj = date_obj.replace(tzinfo=BRAZIL_TIMEZONE)
-            formatted_date = date_obj.strftime("%d/%m/%Y")
-
-            use_alt_color = not use_alt_color
-            row_fill = alt_row_fill if use_alt_color else None
-
-            try:
-                user_obj = await self.bot.fetch_user(int(user_id))
-                user_name = user_obj.display_name
-            except:
-                user_name = all_users.get(user_id, {}).get("name", f"Usuário {user_id}")
-
-            user_role = all_users.get(user_id, {}).get("role", "")
-            role_name = role_display.get(user_role, user_role)
-
-            submitted_at = datetime.fromisoformat(update['submitted_at'].replace('Z', '+00:00'))
-            submitted_at = submitted_at.astimezone(BRAZIL_TIMEZONE)
-            formatted_submit_time = submitted_at.strftime("%d/%m/%Y %H:%M")
-
-            ws.cell(row=row, column=1, value=formatted_date).alignment = Alignment(horizontal="center")
-            ws.cell(row=row, column=2, value=user_name).alignment = Alignment(horizontal="left")
-            ws.cell(row=row, column=3, value=role_name).alignment = Alignment(horizontal="center")
-
-            content_cell = ws.cell(row=row, column=4, value=update['content'])
-            content_cell.alignment = Alignment(wrap_text=True, vertical="top")
-
-            ws.cell(row=row, column=5, value=formatted_submit_time).alignment = Alignment(horizontal="center")
-
-            for col in range(1, 6):
-                cell = ws.cell(row=row, column=col)
-                cell.border = border_all
-                if row_fill:
-                    cell.fill = row_fill
-
-            row += 1
-
-        ws.auto_filter.ref = f"A1:E{row-1}"
-        ws.freeze_panes = 'A2'
-
-        column_widths = [15, 20, 15, 60, 18]
-        for i, width in enumerate(column_widths, 1):
-            ws.column_dimensions[get_column_letter(i)].width = width
-
-        ws.row_dimensions[1].height = 25
-
-        row += 2
-
-        ws.cell(row=row, column=1, value="Resumo do Relatório").font = Font(bold=True, size=12)
-        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=5)
-        row += 1
-
-        summary_headers = ["Estatísticas", "Valor"]
-        for col, header in enumerate(summary_headers, 1):
-            cell = ws.cell(row=row, column=col)
-            cell.value = header
-            cell.font = subheader_font
-            cell.fill = subheader_fill
-            cell.border = border_all
-            cell.alignment = Alignment(horizontal="center")
-        row += 1
-
-        unique_users = set()
-        update_counts = {}
-        for item in sorted_updates:
-            user_id = item['user_id']
-            update_date = item['update']['report_date']
-            unique_users.add(user_id)
-            if update_date not in update_counts:
-                update_counts[update_date] = 0
-            update_counts[update_date] += 1
-
-        summary_data = [
-            ["Período do relatório", f"{data_inicial} a {data_final}"],
-            ["Total de atualizações", len(sorted_updates)],
-            ["Total de usuários", len(unique_users)],
-            ["Média de atualizações por usuário", f"{len(sorted_updates)/len(unique_users):.2f}" if unique_users else "0"]
-        ]
-
-        for item in summary_data:
-            ws.cell(row=row, column=1, value=item[0]).border = border_all
-            ws.cell(row=row, column=2, value=item[1]).border = border_all
-            row += 1
-
-        file_name = f"relatorio_daily_{data_inicial}_{data_final}.xlsx"
-        wb.save(file_name)
 
         try:
+            for user_id, updates in all_updates.items():
+                logger.debug(f"[DEBUG] Processando {len(updates)} atualizações para o usuário {user_id}")
+                for update in updates:
+                    sorted_updates.append({
+                        'user_id': user_id,
+                        'update': update
+                    })
+
+            logger.debug(f"[DEBUG] Total de atualizações coletadas: {len(sorted_updates)}")
+            sorted_updates.sort(key=lambda x: x['update']['report_date'], reverse=True)
+            logger.debug(f"[DEBUG] Atualizações ordenadas por data")
+        except Exception as e:
+            logger.error(f"[DEBUG] Erro ao processar atualizações: {str(e)}")
+            await interaction.followup.send(
+                f"❌ Erro ao processar dados para o relatório: {str(e)}",
+                ephemeral=True
+            )
+            log_command("ERRO", interaction.user, f"/relatorio-daily data_inicial={data_inicial} data_final={data_final}",
+                      f"Erro ao processar dados: {str(e)}")
+            return
+
+        logger.debug(f"[DEBUG] Preenchendo planilha com {len(sorted_updates)} atualizações")
+        for item in sorted_updates:
+            try:
+                user_id = item['user_id']
+                update = item['update']
+
+                date_obj = datetime.strptime(update['report_date'], "%Y-%m-%d")
+                date_obj = date_obj.replace(tzinfo=BRAZIL_TIMEZONE)
+                formatted_date = date_obj.strftime("%d/%m/%Y")
+
+                use_alt_color = not use_alt_color
+                row_fill = alt_row_fill if use_alt_color else None
+
+                try:
+                    user_obj = await self.bot.fetch_user(int(user_id))
+                    user_name = user_obj.display_name
+                except Exception as e:
+                    logger.warning(f"[DEBUG] Não foi possível buscar usuário Discord {user_id}: {str(e)}")
+                    user_name = all_users.get(user_id, {}).get("name", f"Usuário {user_id}")
+
+                user_role = all_users.get(user_id, {}).get("role", "")
+                role_name = role_display.get(user_role, user_role)
+
+                submitted_at = datetime.fromisoformat(update['submitted_at'].replace('Z', '+00:00'))
+                submitted_at = submitted_at.astimezone(BRAZIL_TIMEZONE)
+                formatted_submit_time = submitted_at.strftime("%d/%m/%Y %H:%M")
+
+                ws.cell(row=row, column=1, value=formatted_date).alignment = Alignment(horizontal="center")
+                ws.cell(row=row, column=2, value=user_name).alignment = Alignment(horizontal="left")
+                ws.cell(row=row, column=3, value=role_name).alignment = Alignment(horizontal="center")
+
+                content_cell = ws.cell(row=row, column=4, value=update['content'])
+                content_cell.alignment = Alignment(wrap_text=True, vertical="top")
+
+                ws.cell(row=row, column=5, value=formatted_submit_time).alignment = Alignment(horizontal="center")
+
+                for col in range(1, 6):
+                    cell = ws.cell(row=row, column=col)
+                    cell.border = border_all
+                    if row_fill:
+                        cell.fill = row_fill
+
+                row += 1
+            except Exception as e:
+                logger.error(f"[DEBUG] Erro ao processar linha {row-1}: {str(e)}")
+
+        logger.debug(f"[DEBUG] Finalizando formatação da planilha")
+        try:
+            ws.auto_filter.ref = f"A1:E{row-1}"
+            ws.freeze_panes = 'A2'
+
+            column_widths = [15, 20, 15, 60, 18]
+            for i, width in enumerate(column_widths, 1):
+                ws.column_dimensions[get_column_letter(i)].width = width
+
+            ws.row_dimensions[1].height = 25
+
+            row += 2
+
+            ws.cell(row=row, column=1, value="Resumo do Relatório").font = Font(bold=True, size=12)
+            ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=5)
+            row += 1
+
+            summary_headers = ["Estatísticas", "Valor"]
+            for col, header in enumerate(summary_headers, 1):
+                cell = ws.cell(row=row, column=col)
+                cell.value = header
+                cell.font = subheader_font
+                cell.fill = subheader_fill
+                cell.border = border_all
+                cell.alignment = Alignment(horizontal="center")
+            row += 1
+
+            unique_users = set()
+            update_counts = {}
+            for item in sorted_updates:
+                user_id = item['user_id']
+                update_date = item['update']['report_date']
+                unique_users.add(user_id)
+                if update_date not in update_counts:
+                    update_counts[update_date] = 0
+                update_counts[update_date] += 1
+
+            summary_data = [
+                ["Período do relatório", f"{data_inicial} a {data_final}"],
+                ["Total de atualizações", len(sorted_updates)],
+                ["Total de usuários", len(unique_users)],
+                ["Média de atualizações por usuário", f"{len(sorted_updates)/len(unique_users):.2f}" if unique_users else "0"]
+            ]
+
+            for item in summary_data:
+                ws.cell(row=row, column=1, value=item[0]).border = border_all
+                ws.cell(row=row, column=2, value=item[1]).border = border_all
+                row += 1
+
+            logger.debug(f"[DEBUG] Resumo do relatório adicionado à planilha")
+        except Exception as e:
+            logger.error(f"[DEBUG] Erro ao formatar planilha: {str(e)}")
+
+        file_name = f"relatorio_daily_{data_inicial}_{data_final}.xlsx"
+
+        try:
+            logger.debug(f"[DEBUG] Salvando planilha em {file_name}")
+            wb.save(file_name)
+            logger.debug(f"[DEBUG] Planilha salva com sucesso")
+        except Exception as e:
+            logger.error(f"[DEBUG] Erro ao salvar planilha: {str(e)}")
+            await interaction.followup.send(
+                content=f"❌ Erro ao gerar o arquivo Excel: {str(e)}",
+                ephemeral=True
+            )
+            log_command("ERRO", interaction.user, f"/relatorio-daily data_inicial={data_inicial} data_final={data_final}",
+                       f"Erro ao salvar arquivo Excel: {str(e)}")
+            return
+
+        try:
+            logger.debug(f"[DEBUG] Enviando arquivo {file_name} para o Discord")
             await interaction.followup.send(
                 content=f"📊 Relatório de atualizações diárias ({data_inicial} a {data_final})",
                 file=discord.File(file_name),
                 ephemeral=True
             )
+            logger.debug(f"[DEBUG] Arquivo enviado com sucesso")
 
             log_command("RELATÓRIO", interaction.user, f"/relatorio-daily data_inicial={data_inicial} data_final={data_final}",
                        f"Relatório Excel gerado com sucesso")
 
         except Exception as e:
+            logger.error(f"[DEBUG] Erro ao enviar arquivo: {str(e)}")
             await interaction.followup.send(
                 content=f"❌ Erro ao enviar o arquivo: {str(e)}",
                 ephemeral=True
@@ -1574,9 +1632,11 @@ class DailyCommands(commands.Cog):
 
         finally:
             try:
-                os.remove(file_name)
-            except:
-                pass
+                if os.path.exists(file_name):
+                    logger.debug(f"[DEBUG] Removendo arquivo temporário {file_name}")
+                    os.remove(file_name)
+            except Exception as e:
+                logger.error(f"[DEBUG] Erro ao remover arquivo temporário: {str(e)}")
 
 
 class SupportModal(ui.Modal, title="Suporte - Enviar Mensagem"):
