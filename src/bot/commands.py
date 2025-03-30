@@ -2,6 +2,7 @@ from typing import Optional, List, Tuple, Dict, Any
 from datetime import datetime, timedelta
 import os
 import logging
+import asyncio
 
 import discord
 from discord import app_commands, ui
@@ -12,13 +13,15 @@ from openpyxl.utils import get_column_letter
 
 from src.storage.feature_toggle import toggle_feature, is_feature_enabled
 from src.storage.time_tracking import clock_in, clock_out, get_user_records, get_all_users_records
-from src.storage.users import register_user, get_user, get_users_by_role, remove_user
+from src.storage.users import register_user, get_user, get_users_by_role, remove_user, check_user_is_po
 from src.storage.daily import submit_daily_update, get_user_daily_updates, get_all_daily_updates, get_missing_updates, clear_all_daily_updates, has_submitted_daily_update
 from src.utils.config import get_env, get_br_time, to_br_timezone, BRAZIL_TIMEZONE, log_command, TIME_TRACKING_CHANNEL_ID
 from src.storage.ignored_dates import add_ignored_date, get_all_ignored_dates, remove_ignored_date, parse_date_config, should_ignore_date
 
 command_logger = logging.getLogger('team_analysis_commands')
 command_logger.setLevel(logging.DEBUG)
+
+logger = logging.getLogger('team_analysis_bot')
 
 
 class DateConfigModal(ui.Modal, title="Configurar Datas Ignoradas - Cobrança Daily"):
@@ -88,7 +91,6 @@ class DateConfigModal(ui.Modal, title="Configurar Datas Ignoradas - Cobrança Da
             log_command("INFO", interaction.user, "/config daily_collection", f"Configuradas {success_count} datas ignoradas")
 
         except Exception as e:
-            logger = logging.getLogger('team_analysis_bot')
             logger.error(f"Erro ao processar o modal de configuração: {str(e)}")
             await interaction.followup.send(
                 f"❌ Ocorreu um erro ao processar a configuração: {str(e)}",
@@ -98,9 +100,110 @@ class DateConfigModal(ui.Modal, title="Configurar Datas Ignoradas - Cobrança Da
 
 
 class AdminCommands(commands.Cog):
+    """Cog para comandos administrativos do bot."""
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+
+    async def _check_daily_collection_enabled(self, interaction: discord.Interaction) -> bool:
+        """
+        Verifica se as funcionalidades de daily e cobrança estão ativadas.
+
+        Args:
+            interaction: Interação do Discord para enviar mensagem de erro.
+        """
+        if not is_feature_enabled("daily"):
+            await interaction.response.send_message(
+                "⚠️ A funcionalidade de atualizações diárias está desativada. "
+                "Você pode ativá-la com o comando `/toggle funcionalidade=daily`.",
+                ephemeral=True
+            )
+            log_command("INFO", interaction.user, interaction.command.name, "Funcionalidade de daily desativada")
+            return False
+
+        if not is_feature_enabled("daily_collection"):
+            await interaction.response.send_message(
+                "⚠️ A funcionalidade de cobrança de daily está desativada. "
+                "Você pode ativá-la com o comando `/toggle funcionalidade=daily_collection`.",
+                ephemeral=True
+            )
+            log_command("INFO", interaction.user, interaction.command.name, "Funcionalidade de cobrança de daily desativada")
+            return False
+
+        return True
+
+    async def _process_management_reminder(self, missing_users: List[str], requester: discord.User) -> Dict[str, List[discord.User]]:
+        """Processa uma cobrança iniciada pela gerência, enviando mensagens privadas."""
+        pending_by_date: Dict[str, List[discord.User]] = {}
+        processed_users = []
+
+        if not missing_users:
+            return pending_by_date
+
+        for user_id in missing_users:
+            try:
+                user = await self.bot.fetch_user(int(user_id))
+                processed_users.append(user)
+
+                embed = discord.Embed(
+                    title="⚠️ Cobrança: Atualizações Diárias Pendentes",
+                    description=f"A equipe de gerência de projetos ({requester.mention}) notou que você está com atualizações diárias pendentes.",
+                    color=discord.Color.red()
+                )
+
+                yesterday = get_br_time() - timedelta(days=1)
+                yesterday_db = yesterday.strftime("%Y-%m-%d")
+
+                if yesterday.weekday() >= 5:
+                    days_to_subtract = yesterday.weekday() - 4
+                    last_weekday = yesterday - timedelta(days=days_to_subtract)
+                    yesterday_db = last_weekday.strftime("%Y-%m-%d")
+
+                daily_channel_id = get_env("DAILY_CHANNEL_ID")
+                daily_channel = None
+
+                if daily_channel_id:
+                    try:
+                        daily_channel = await self.bot.fetch_channel(int(daily_channel_id))
+                    except (discord.NotFound, discord.Forbidden):
+                        pass
+
+                if daily_channel:
+                    embed.add_field(
+                        name="⏰ Solicitação Urgente",
+                        value=f"Por favor, use o comando `/daily` no canal {daily_channel.mention} para atualizar seu status o mais rápido possível.",
+                        inline=False
+                    )
+                else:
+                    embed.add_field(
+                        name="⏰ Solicitação Urgente",
+                        value="Por favor, use o comando `/daily` para atualizar seu status o mais rápido possível.",
+                        inline=False
+                    )
+
+                embed.add_field(
+                    name="📝 Lembrete",
+                    value="Manter suas atualizações diárias em dia é essencial para o acompanhamento do projeto pela equipe de gerência.",
+                    inline=False
+                )
+
+                embed.set_footer(text=f"Cobrança realizada em: {get_br_time().strftime('%d/%m/%Y %H:%M:%S')}")
+
+                await user.send(embed=embed)
+
+                if yesterday_db not in pending_by_date:
+                    pending_by_date[yesterday_db] = []
+                pending_by_date[yesterday_db].append(user)
+
+                logger.info(f"Cobrança gerencial enviada para o usuário {user_id}")
+                await asyncio.sleep(1)
+
+            except discord.HTTPException as e:
+                logger.error(f"Erro ao enviar cobrança para o usuário {user_id}: {str(e)}")
+            except Exception as e:
+                logger.error(f"Erro inesperado ao processar cobrança para o usuário {user_id}: {str(e)}")
+
+        return pending_by_date
 
     @app_commands.command(name="toggle", description="Ativa/desativa funcionalidades do bot")
     @app_commands.describe(funcionalidade="Funcionalidade para ativar/desativar")
@@ -818,6 +921,103 @@ class AdminCommands(commands.Cog):
             )
             log_command("ERRO", interaction.user, f"/testar-datas-ignoradas data={data}", "Formato de data inválido")
 
+    @app_commands.command(name="cobrar_daily", description="Cobra as atualizações diárias pendentes. (Somente POs e Admins)")
+    async def cobrar_daily(self, interaction: discord.Interaction):
+        """Comando para POs e admins cobrarem atualizações diárias pendentes."""
+        if not await self._check_daily_collection_enabled(interaction):
+            return
+
+        br_time = get_br_time()
+        is_weekend = br_time.weekday() >= 5
+
+        weekend_notice = ""
+        if is_weekend:
+            weekend_notice = f"\n\nℹ️ Hoje é fim de semana ({br_time.strftime('%d/%m/%Y')}). O comando verificará apenas atualizações pendentes de dias úteis."
+
+        if should_ignore_date(br_time):
+            await interaction.response.send_message(
+                f"⚠️ A data atual ({br_time.strftime('%d/%m/%Y')}) está configurada para ser ignorada na cobrança de daily.",
+                ephemeral=True
+            )
+            log_command("INFO", interaction.user, "/cobrar_daily", f"Data {br_time.strftime('%Y-%m-%d')} ignorada")
+            return
+
+        daily_channel_id = get_env("DAILY_CHANNEL_ID")
+
+        if daily_channel_id and str(interaction.channel_id) != daily_channel_id:
+            try:
+                daily_channel = await self.bot.fetch_channel(int(daily_channel_id))
+                await interaction.response.send_message(
+                    f"Este comando só pode ser usado no canal {daily_channel.mention}.",
+                    ephemeral=True
+                )
+            except (discord.NotFound, discord.Forbidden):
+                await interaction.response.send_message(
+                    "Este comando só pode ser usado no canal de atualizações diárias.",
+                    ephemeral=True
+                )
+            return
+
+        user_id = str(interaction.user.id)
+        admin_role_id = get_env("ADMIN_ROLE_ID")
+        has_permission = False
+
+        if check_user_is_po(user_id):
+            has_permission = True
+            logger.info(f"Usuário {user_id} é PO e solicitou cobrança de atualizações diárias")
+
+        elif admin_role_id and interaction.guild:
+            member = interaction.guild.get_member(int(user_id))
+            if member and any(role.id == int(admin_role_id) for role in member.roles):
+                has_permission = True
+                logger.info(f"Usuário {user_id} tem cargo de admin e solicitou cobrança de atualizações diárias")
+
+        if not has_permission:
+            await interaction.response.send_message(
+                "Você não tem permissão para usar este comando. Somente POs e administradores podem usá-lo.",
+                ephemeral=True
+            )
+            logger.warning(f"Usuário {user_id} tentou usar o comando de cobrança sem permissão")
+            return
+
+        await interaction.response.defer(thinking=True)
+
+        missing_users = get_missing_updates()
+
+        if not missing_users:
+            await interaction.followup.send(f"Todos os usuários estão com suas atualizações diárias em dia! 🎉{weekend_notice}")
+            return
+
+        pending_by_date = await self._process_management_reminder(missing_users, interaction.user)
+
+        if not pending_by_date:
+            await interaction.followup.send(f"Não há atualizações pendentes para dias úteis.{weekend_notice}")
+            return
+
+        embed = discord.Embed(
+            title="📊 Relatório de Cobrança de Atualizações",
+            description=f"A equipe de gerência de projetos ({interaction.user.mention}) solicitou uma cobrança das atualizações pendentes.{weekend_notice}",
+            color=discord.Color.brand_red()
+        )
+
+        for date_str, users in pending_by_date.items():
+            date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+            date_obj = date_obj.replace(tzinfo=BRAZIL_TIMEZONE)
+            formatted_date = date_obj.strftime("%d/%m/%Y")
+
+            user_list = "\n".join([f"• {user.mention}" for user in users])
+
+            embed.add_field(
+                name=f"📅 Dia {formatted_date}",
+                value=user_list if user_list else "Nenhum usuário pendente.",
+                inline=False
+            )
+
+        embed.set_footer(text=f"Cobrança solicitada em: {get_br_time().strftime('%d/%m/%Y %H:%M:%S')}")
+
+        await interaction.followup.send(embed=embed)
+        logger.info(f"Cobrança de atualizações diárias executada por {interaction.user.id}")
+
 
 class TimeTrackingCommands(commands.Cog):
 
@@ -1351,7 +1551,6 @@ class DailyCommands(commands.Cog):
             data_inicial: Data inicial no formato YYYY-MM-DD (padrão: 30 dias atrás).
             data_final: Data final no formato YYYY-MM-DD (padrão: hoje).
         """
-        logger = logging.getLogger('team_analysis_commands')
         logger.debug(f"[DEBUG] Iniciando comando relatorio-daily: data_inicial={data_inicial}, data_final={data_final}")
 
         admin_role_id = int(get_env("ADMIN_ROLE_ID"))
@@ -1771,7 +1970,6 @@ class ConfigView(ui.View):
             await interaction.response.send_modal(modal)
             log_command("INFO", interaction.user, f"/config funcionalidade={self.funcionalidade}", "Modal de configuração de datas ignoradas aberto")
         except Exception as e:
-            logger = logging.getLogger('team_analysis_bot')
             logger.error(f"Erro ao abrir modal de configuração: {str(e)}")
             await interaction.response.send_message(
                 f"❌ Ocorreu um erro ao abrir o modal de configuração: {str(e)}",

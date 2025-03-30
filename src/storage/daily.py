@@ -178,6 +178,7 @@ def get_all_daily_updates(start_date: Optional[str] = None, end_date: Optional[s
 def get_missing_updates(for_date: Optional[str] = None) -> List[str]:
     """
     Obtém lista de IDs de usuários do tipo 'teammember' que não enviaram atualização para a data especificada.
+    Finais de semana (sábado e domingo) são automaticamente ignorados.
 
     Args:
         for_date (Optional[str]): Data para verificar no formato YYYY-MM-DD. Se None, usa o dia anterior.
@@ -188,6 +189,11 @@ def get_missing_updates(for_date: Optional[str] = None) -> List[str]:
     if not for_date:
         yesterday = get_br_time() - timedelta(days=1)
         for_date = yesterday.strftime("%Y-%m-%d")
+
+    # Verifica se a data é um fim de semana (5=sábado, 6=domingo)
+    check_date = datetime.strptime(for_date, "%Y-%m-%d")
+    if check_date.weekday() >= 5:
+        return []  # Não cobra atualizações em finais de semana
 
     team_members = get_users_by_role("teammember")
     team_member_ids = [tm['user_id'] for tm in team_members]
