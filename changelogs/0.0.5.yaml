@@ -1,0 +1,26 @@
+version: "0.0.5"
+release_date: "2023-10-26"
+title: "Melhorias no Sistema de Changelog - Versão 0.0.5"
+description: "Correções e melhorias no sistema de notificação de changelog, incluindo envio de versões anteriores não anunciadas."
+
+changes:
+  melhorado:
+    - "Sistema de changelog agora envia notificações de versões anteriores que ainda não foram anunciadas"
+    - "Changelogs são enviados em ordem cronológica, das versões mais antigas para as mais recentes"
+    - "Logs detalhados para facilitar diagnóstico de problemas com anúncios de changelog"
+
+  corrigido:
+    - "Adicionada dependência explícita de PyYAML ao requirements.txt para garantir funcionamento correto em todos os ambientes"
+    - "Corrigido erro de referência ao logger na inicialização do bot"
+    - "Evitando duplicação de código com a centralização da criação de tabelas no database.py"
+
+  alterado:
+    - "Implementação mais robusta para detecção de falhas na leitura de arquivos de changelog"
+    - "Refatoração da função de verificação de changelog para melhor manutenibilidade"
+
+notes: |
+  Esta versão garante que todas as atualizações sejam devidamente anunciadas mesmo quando
+  versões anteriores não tiveram a oportunidade de enviar suas notificações no canal configurado.
+
+  Para garantir que o bot funcione corretamente após a atualização, certifique-se de que o
+  pacote PyYAML está instalado em seu ambiente de execução.

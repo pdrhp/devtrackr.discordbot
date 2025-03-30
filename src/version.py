@@ -57,3 +57,34 @@ def get_version():
     except Exception as e:
         logger.error(f"Erro ao determinar a versão: {str(e)}")
         return __default_version__
+
+def get_all_versions():
+    """
+    Retorna todas as versões disponíveis ordenadas semanticamente (mais antiga para mais recente).
+
+    Returns:
+        list: Lista de strings com as versões disponíveis.
+    """
+    try:
+        if not os.path.exists(CHANGELOGS_DIR):
+            logger.warning(f"Diretório de changelogs não encontrado: {CHANGELOGS_DIR}")
+            return []
+
+        changelog_files = [f for f in os.listdir(CHANGELOGS_DIR)
+                          if f.endswith('.yaml') and f != 'modelo.yaml' and re.match(r'^\d+\.\d+\.\d+$', f.split('.yaml')[0])]
+
+        logger.debug(f"Arquivos de changelog encontrados: {changelog_files}")
+
+        if not changelog_files:
+            logger.warning("Nenhum arquivo de changelog encontrado")
+            return []
+
+        changelog_files.sort(key=lambda x: [int(p) for p in x.split('.yaml')[0].split('.')])
+
+        versions = [f.split('.yaml')[0] for f in changelog_files]
+
+        return versions
+
+    except Exception as e:
+        logger.error(f"Erro ao listar versões disponíveis: {str(e)}")
+        return []
