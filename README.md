@@ -18,7 +18,7 @@ Um bot do Discord para análise e gerenciamento de times de desenvolvimento com 
 /src/
   /bot/       - Código relacionado ao bot do Discord
   /storage/   - Código para armazenamento e persistência
-  /reporting/ - Código para geração de relatórios
+  /utils/     - Código de utilitarios.
 ```
 
 ## Configuração
@@ -32,6 +32,36 @@ Um bot do Discord para análise e gerenciamento de times de desenvolvimento com 
    - `DAILY_REMINDER_TIME` - Horário para lembretes diários no formato HH:MM (opcional, padrão: 10:00)
    - `SUPPORT_USER_ID` - ID do usuário que receberá mensagens de suporte (opcional)
 4. Execute o bot com `python main.py`
+
+## Usando Docker
+
+Você pode executar este bot usando Docker com a imagem publicada no Docker Hub:
+
+```bash
+docker run -d \
+  -e DISCORD_TOKEN=seu_token \
+  -e ADMIN_ROLE_ID=id_do_cargo \
+  -e DAILY_CHANNEL_ID=id_do_canal \
+  -e DAILY_REMINDER_TIME=10:00 \
+  -e SUPPORT_USER_ID=id_do_usuario \
+  -v /caminho/para/seu/banco:/app/data \
+  pdrh/devtracker:latest
+```
+
+### Versões Disponíveis
+
+A imagem está disponível no Docker Hub em [pdrh/devtracker](https://hub.docker.com/r/pdrh/devtracker) com as seguintes tags:
+
+- `latest` - Versão mais recente do bot
+- Tags de versão específicas (ex: `0.0.2`, `0.0.3`) - Versões estáveis específicas
+
+### Construindo sua própria imagem Docker
+
+Para construir sua própria imagem Docker:
+
+```bash
+docker build -t seu-usuário/devtracker:tag .
+```
 
 ## Comandos Principais
 
