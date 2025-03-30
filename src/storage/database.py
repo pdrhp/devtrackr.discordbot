@@ -27,7 +27,6 @@ def initialize_database():
     conn = get_connection()
     cursor = conn.cursor()
 
-    # Criar tabela para registros de ponto
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS time_tracking (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -39,7 +38,6 @@ def initialize_database():
     )
     ''')
 
-    # Criar tabela para usuários
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -51,7 +49,6 @@ def initialize_database():
     )
     ''')
 
-    # Criar tabela para atualizações diárias (daily updates)
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS daily_updates (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -61,6 +58,14 @@ def initialize_database():
         submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         last_updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         UNIQUE(user_id, report_date)  -- Cada usuário só pode ter um relatório por data
+    )
+    ''')
+
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS changelog_announcements (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        version TEXT NOT NULL UNIQUE,
+        announced_at TIMESTAMP NOT NULL
     )
     ''')
 

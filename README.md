@@ -35,33 +35,81 @@ Um bot do Discord para análise e gerenciamento de times de desenvolvimento com 
 
 ## Usando Docker
 
-Você pode executar este bot usando Docker com a imagem publicada no Docker Hub:
+Para executar o bot utilizando Docker, você pode usar a seguinte linha de comando:
 
 ```bash
-docker run -d \
-  -e DISCORD_TOKEN=seu_token \
-  -e ADMIN_ROLE_ID=id_do_cargo \
-  -e DAILY_CHANNEL_ID=id_do_canal \
-  -e DAILY_REMINDER_TIME=10:00 \
-  -e SUPPORT_USER_ID=id_do_usuario \
-  -v /caminho/para/seu/banco:/app/data \
+docker run -d --name devtracker \
+  -e DISCORD_TOKEN=seu_token_aqui \
+  -e ADMIN_ROLE_ID=000000000000000000 \
+  -e DAILY_CHANNEL_ID=seu_canal_aqui \
+  -e TIME_TRACKING_CHANNEL_ID=seu_canal_aqui \
+  -e CHANGELOG_CHANNEL_ID=seu_canal_aqui \
+  -v ./data:/app/data \
+  -v ./logs:/app/logs \
+  -v ./changelogs:/app/changelogs \
   pdrh/devtracker:latest
 ```
 
 ### Versões Disponíveis
 
-A imagem está disponível no Docker Hub em [pdrh/devtracker](https://hub.docker.com/r/pdrh/devtracker) com as seguintes tags:
+O bot está disponível no Docker Hub: [pdrh/devtracker](https://hub.docker.com/r/pdrh/devtracker)
 
-- `latest` - Versão mais recente do bot
-- Tags de versão específicas (ex: `0.0.2`, `0.0.3`) - Versões estáveis específicas
+Tags disponíveis:
 
-### Construindo sua própria imagem Docker
+- `latest`: Versão mais recente
+- Versões específicas (ex: `0.0.3`, `1.0.0`, etc.)
 
-Para construir sua própria imagem Docker:
+### Construindo sua própria imagem
+
+Você também pode construir sua própria imagem Docker com o seguinte comando:
 
 ```bash
-docker build -t seu-usuário/devtracker:tag .
+docker build -t seu-usuario/devtracker .
 ```
+
+## Sistema de Changelog
+
+O bot inclui um sistema de changelogs que permite anunciar automaticamente atualizações quando uma nova versão é iniciada.
+
+### Configuração
+
+1. Configure a variável de ambiente `CHANGELOG_CHANNEL_ID` com o ID do canal onde os changelogs devem ser publicados.
+2. Crie um arquivo YAML na pasta `changelogs/` com o nome correspondente à versão (ex: `0.0.3.yaml`).
+
+### Formato do Arquivo de Changelog
+
+Os arquivos de changelog seguem o formato YAML com a seguinte estrutura:
+
+```yaml
+version: "0.0.3"
+release_date: "2023-10-20"
+title: "Título da Versão"
+description: "Descrição geral da versão"
+
+changes:
+  adicionado:
+    - "Nova funcionalidade 1"
+    - "Nova funcionalidade 2"
+
+  melhorado:
+    - "Melhoria 1"
+    - "Melhoria 2"
+
+  corrigido:
+    - "Bug corrigido 1"
+    - "Bug corrigido 2"
+
+  alterado:
+    - "Alteração 1"
+```
+
+Um arquivo modelo está disponível em `changelogs/modelo.yaml` para referência.
+
+### Comportamento
+
+- Os changelogs são anunciados apenas uma vez quando o bot inicia com uma nova versão
+- Os anúncios só ocorrem se o canal de changelog estiver configurado
+- Cada versão é anunciada apenas uma vez, mesmo em reinicializações subsequentes do bot
 
 ## Comandos Principais
 

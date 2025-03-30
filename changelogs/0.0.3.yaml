@@ -1,0 +1,20 @@
+version: "0.0.3"
+release_date: "2025-03-30"
+title: "Atualização de Usabilidade - Versão 0.0.3"
+description: "Esta atualização traz melhorias na usabilidade do bot e adiciona novos recursos."
+
+changes:
+  adicionado:
+    - "Sistema de notificação de changelogs ao iniciar nova versão"
+    - "Suporte para executar o bot via Docker"
+
+  melhorado:
+    - "Suporte a múltiplos formatos de data (YYYY-MM-DD, YYYY/MM/DD, DD/MM/YYYY)"
+    - "Daily agora funciona nos finais de semana também"
+
+  corrigido:
+    - "Corrigido erro ao registrar tempo de atividade com datas em formato incorreto"
+    - "Resolvido problema com caracteres especiais nos relatórios diários"
+
+  alterado:
+    - "Padronização do formato de data para exibição em DD/MM/YYYY em todas as mensagens"

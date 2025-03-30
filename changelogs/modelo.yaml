@@ -1,0 +1,54 @@
+# Modelo para arquivo de changelog
+# Crie um novo arquivo com o nome da versão (ex: 1.0.0.yaml) baseado neste modelo
+
+version: "0.0.0" # Versão do lançamento (deve corresponder ao nome do arquivo)
+release_date: "YYYY-MM-DD" # Data de lançamento no formato YYYY-MM-DD
+title: "Título da Versão - Versão X.Y.Z" # Título descritivo para esta versão
+description: "Uma descrição geral desta versão e o que ela traz de novo."
+
+# Lista de mudanças agrupadas por tipo
+changes:
+  # Novos recursos ou funcionalidades
+  adicionado:
+    - "Descrição da nova funcionalidade 1"
+    - "Descrição da nova funcionalidade 2"
+    - "Descrição da nova funcionalidade 3"
+
+  # Melhorias em funcionalidades existentes
+  melhorado:
+    - "Descrição da melhoria 1"
+    - "Descrição da melhoria 2"
+
+  # Correções de bugs
+  corrigido:
+    - "Descrição do bug corrigido 1"
+    - "Descrição do bug corrigido 2"
+
+  # Alterações que podem afetar o comportamento existente
+  alterado:
+    - "Descrição da alteração 1"
+    - "Descrição da alteração 2"
+
+  # Recursos ou funcionalidades removidas (opcional)
+  removido:
+    - "Descrição do recurso removido"
+
+  # Alterações relacionadas à segurança (opcional)
+  seguranca:
+    - "Descrição da melhoria de segurança"
+
+  # Alterações para desenvolvedores (opcional)
+  desenvolvimento:
+    - "Descrição da alteração para desenvolvedores"
+
+# Notas adicionais (opcional)
+notes: |
+  Informações adicionais sobre a versão, como instruções específicas para atualização,
+  requisitos especiais, ou avisos importantes para os usuários.
+
+  Este campo pode conter várias linhas de texto.
+
+# Contribuidores desta versão (opcional)
+contributors:
+  - "Nome do Contribuidor 1"
+  - "Nome do Contribuidor 2"

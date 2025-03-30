@@ -70,8 +70,7 @@ logger = configure_logging()
 def get_env(key, default=None):
     """
     Obtém uma variável de ambiente, com valor padrão opcional.
-    Se o valor padrão for fornecido e a variável não existir, o valor padrão é retornado.
-    Caso contrário, uma exceção é levantada.
+    Se a variável não existir, o valor padrão é retornado.
 
     Args:
         key: Nome da variável de ambiente.
@@ -79,14 +78,8 @@ def get_env(key, default=None):
 
     Returns:
         O valor da variável de ambiente ou o valor padrão.
-
-    Raises:
-        KeyError: Se a variável não existe e nenhum valor padrão foi fornecido.
     """
-    value = os.environ.get(key, default)
-    if value is None:
-        raise KeyError(f"Variável de ambiente '{key}' não encontrada e nenhum valor padrão foi fornecido.")
-    return value
+    return os.environ.get(key, default)
 
 
 def get_br_time() -> datetime:

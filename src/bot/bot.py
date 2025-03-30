@@ -5,6 +5,9 @@ from logging.handlers import RotatingFileHandler
 
 import discord
 from discord.ext import commands
+from discord import app_commands
+
+from src.bot.changelog import check_and_send_changelog
 
 LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 
@@ -17,13 +20,14 @@ def setup_logging():
     log_file = os.path.join(log_dir, f'team_analysis_bot_{today}.log')
 
     logger = logging.getLogger('team_analysis_bot')
-    logger.setLevel(logging.INFO)
+    logger.setLevel(logging.DEBUG)
 
     if logger.handlers:
         logger.handlers.clear()
 
     console_handler = logging.StreamHandler()
     console_handler.setFormatter(logging.Formatter(LOG_FORMAT))
+    console_handler.setLevel(logging.DEBUG)
     logger.addHandler(console_handler)
 
     file_handler = RotatingFileHandler(
@@ -80,9 +84,18 @@ class TeamAnalysisBot(commands.Bot):
         logger.info("Configuração do bot concluída!")
 
     async def on_ready(self):
-        """Manipulador de evento quando o bot está conectado e pronto."""
-        logger.info(f'Conectado como {self.user} (ID: {self.user.id})')
-        logger.info('------')
+        """
+        Método executado quando o bot está pronto
+        """
+        logger.info('Bot logado como {0.user}'.format(self))
+
+        await check_and_send_changelog(self)
+
+        activity = discord.Activity(
+            type=discord.ActivityType.watching,
+            name="o desempenho da equipe!"
+        )
+        await self.change_presence(activity=activity)
 
         try:
             synced = await self.tree.sync()

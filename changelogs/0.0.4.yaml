@@ -1,0 +1,29 @@
+version: "0.0.4"
+release_date: "2023-10-25"
+title: "Sistema de Changelog - Versão 0.0.4"
+description: "Implementação do sistema de notificação de changelog e detecção automática de versão."
+
+changes:
+  adicionado:
+    - "Sistema de notificação de changelog que anuncia automaticamente novas versões ao iniciar o bot"
+    - "Detecção automática de versão com base nos arquivos de changelog mais recentes"
+    - "Nova configuração CHANGELOG_CHANNEL_ID para configurar o canal de anúncios"
+    - "Documentação detalhada sobre o sistema de changelog no README"
+
+  melhorado:
+    - "Logs detalhados para facilitar o diagnóstico de problemas"
+    - "Integração com o sistema de versionamento existente baseado em tags"
+    - "Tratamento robusto de erros para evitar falhas em cenários inesperados"
+
+  alterado:
+    - "Redução de duplicação de código através da centralização da criação de tabelas no database.py"
+    - "Mensagens de log mais detalhadas para diagnóstico e monitoramento"
+
+notes: |
+  Para usar o sistema de changelog:
+  1. Configure a variável de ambiente CHANGELOG_CHANNEL_ID com o ID do canal onde os changelogs devem ser publicados
+  2. Crie um arquivo YAML na pasta `changelogs/` com o nome seguindo o padrão X.Y.Z.yaml (ex: 0.0.4.yaml)
+  3. Siga o formato de exemplo em `changelogs/modelo.yaml`
+
+  O bot detectará automaticamente a versão mais recente com base nos arquivos de changelog
+  e enviará notificações apenas uma vez para cada versão.
