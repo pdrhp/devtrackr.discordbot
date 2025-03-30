@@ -45,6 +45,7 @@ RUN mkdir -p /app/data /app/logs && \
 
 COPY --chown=botuser:botuser src/ /app/src/
 COPY --chown=botuser:botuser main.py /app/
+COPY --chown=botuser:botuser changelogs/ /app/changelogs/
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD python -c "import sys; sys.exit(0 if __import__('os').path.exists('/app/data/teamanalysis.db') else 1)"
