@@ -8,13 +8,12 @@ from datetime import datetime, timezone, timedelta
 import logging
 from typing import Any, Dict, Optional, Union
 import pytz
+import re
 
 import discord
 
-# Zona de tempo do Brasil (GMT-3)
 BRAZIL_TIMEZONE = pytz.timezone('America/Sao_Paulo')
 
-# Canais especiais
 DAILY_CHANNEL_ID = "DAILY_CHANNEL_ID"
 TIME_TRACKING_CHANNEL_ID = "TIME_TRACKING_CHANNEL_ID"
 
@@ -22,13 +21,10 @@ DEFAULT_CONFIG = {
     "ADMIN_ROLE_ID": "000000000000000000",
 }
 
-# Configurar logger principal
 logger = logging.getLogger('team_analysis_bot')
 
-# Para facilitar a verificação de canal de time tracking
 TIME_TRACKING_CHANNEL_ID = int(os.getenv("TIME_TRACKING_CHANNEL_ID", "0"))
 
-# Configuração de logging
 log_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'logs')
 os.makedirs(log_dir, exist_ok=True)
 
@@ -153,3 +149,61 @@ def log_command(action: str, user: Union[discord.User, discord.Member], command:
     cmd_logger.info(log_message)
 
     logger.info(f"COMANDO: {log_message}")
+
+def parse_date_string(date_string: Optional[str]) -> Optional[str]:
+    """
+    Converte uma string de data em vários formatos para o formato interno padrão YYYY-MM-DD.
+    Aceita os formatos:
+    - YYYY-MM-DD
+    - YYYY/MM/DD
+    - DD/MM/YYYY
+
+    Args:
+        date_string: String de data a ser convertida ou None.
+
+    Returns:
+        String de data no formato YYYY-MM-DD ou None se a entrada for None ou inválida.
+    """
+    if not date_string:
+        return None
+
+    date_string = date_string.strip()
+
+    if re.match(r'^\d{4}-\d{2}-\d{2}$', date_string):
+        try:
+            datetime.strptime(date_string, "%Y-%m-%d")
+            return date_string
+        except ValueError:
+            return None
+
+    if re.match(r'^\d{4}/\d{2}/\d{2}$', date_string):
+        try:
+            dt = datetime.strptime(date_string, "%Y/%m/%d")
+            return dt.strftime("%Y-%m-%d")
+        except ValueError:
+            return None
+
+    if re.match(r'^\d{2}/\d{2}/\d{4}$', date_string):
+        try:
+            dt = datetime.strptime(date_string, "%d/%m/%Y")
+            return dt.strftime("%Y-%m-%d")
+        except ValueError:
+            return None
+
+    return None
+
+def format_date_for_display(date_string: str) -> str:
+    """
+    Formata uma data no formato interno YYYY-MM-DD para exibição no formato DD/MM/YYYY.
+
+    Args:
+        date_string: Data no formato YYYY-MM-DD.
+
+    Returns:
+        Data formatada como DD/MM/YYYY.
+    """
+    try:
+        dt = datetime.strptime(date_string, "%Y-%m-%d")
+        return dt.strftime("%d/%m/%Y")
+    except ValueError:
+        return date_string

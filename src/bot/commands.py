@@ -15,7 +15,7 @@ from src.storage.feature_toggle import toggle_feature, is_feature_enabled
 from src.storage.time_tracking import clock_in, clock_out, get_user_records, get_all_users_records
 from src.storage.users import register_user, get_user, get_users_by_role, remove_user, check_user_is_po
 from src.storage.daily import submit_daily_update, get_user_daily_updates, get_all_daily_updates, get_missing_updates, clear_all_daily_updates, has_submitted_daily_update
-from src.utils.config import get_env, get_br_time, to_br_timezone, BRAZIL_TIMEZONE, log_command, TIME_TRACKING_CHANNEL_ID
+from src.utils.config import get_env, get_br_time, to_br_timezone, BRAZIL_TIMEZONE, log_command, TIME_TRACKING_CHANNEL_ID, parse_date_string, format_date_for_display
 from src.storage.ignored_dates import add_ignored_date, get_all_ignored_dates, remove_ignored_date, parse_date_config, should_ignore_date
 
 command_logger = logging.getLogger('team_analysis_commands')
@@ -30,7 +30,7 @@ class DateConfigModal(ui.Modal, title="Configurar Datas Ignoradas - Cobrança Da
     dates_config = ui.TextInput(
         label="Datas a ignorar",
         style=discord.TextStyle.paragraph,
-        placeholder="Formatos: 2023-12-25 (data única), 2023-12-24-2024-01-03 (intervalo)",
+        placeholder="Formatos: AAAA-MM-DD ou AAAA/MM/DD ou DD/MM/AAAA (data única), AAAA-MM-DD-AAAA-MM-DD (intervalo)",
         required=False
     )
 
@@ -47,7 +47,11 @@ class DateConfigModal(ui.Modal, title="Configurar Datas Ignoradas - Cobrança Da
 
             if not date_pairs:
                 await interaction.followup.send(
-                    "⚠️ Nenhuma data válida foi configurada. Por favor, verifique o formato e tente novamente.",
+                    "⚠️ Nenhuma data válida foi configurada. Por favor, verifique o formato e tente novamente.\n\n"
+                    "**Formatos aceitos:**\n"
+                    "• Data única: `AAAA-MM-DD`, `AAAA/MM/DD` ou `DD/MM/AAAA`\n"
+                    "• Intervalo: `AAAA-MM-DD-AAAA-MM-DD`, `AAAA/MM/DD-AAAA/MM/DD` ou `DD/MM/AAAA-DD/MM/AAAA`\n"
+                    "• Múltiplas datas: separar por vírgula",
                     ephemeral=True
                 )
                 log_command("ERRO", interaction.user, "/config daily_collection", "Formato de data inválido")
@@ -863,7 +867,7 @@ class AdminCommands(commands.Cog):
 
     @app_commands.command(name="testar-datas-ignoradas", description="Testa se uma data específica está configurada para ser ignorada")
     @app_commands.describe(
-        data="Data para testar no formato YYYY-MM-DD"
+        data="Data para testar (formatos aceitos: YYYY-MM-DD, YYYY/MM/DD ou DD/MM/YYYY)"
     )
     async def test_ignored_date(
         self,
@@ -897,29 +901,39 @@ class AdminCommands(commands.Cog):
             log_command("PERMISSÃO NEGADA", interaction.user, f"/testar-datas-ignoradas data={data}")
             return
 
+        formatted_data = parse_date_string(data)
+        if not formatted_data:
+            await interaction.response.send_message(
+                f"⚠️ Formato de data inválido: {data}. Formatos aceitos: YYYY-MM-DD, YYYY/MM/DD ou DD/MM/YYYY.",
+                ephemeral=True
+            )
+            log_command("ERRO", interaction.user, f"/testar-datas-ignoradas data={data}", "Formato de data inválido")
+            return
+
         try:
-            date_obj = datetime.strptime(data, "%Y-%m-%d")
+            date_obj = datetime.strptime(formatted_data, "%Y-%m-%d")
 
             is_ignored = should_ignore_date(date_obj)
+            formatted_date = format_date_for_display(formatted_data)
 
             if is_ignored:
                 await interaction.response.send_message(
-                    f"✅ A data **{date_obj.strftime('%d/%m/%Y')}** está configurada para ser ignorada na cobrança de daily.",
+                    f"✅ A data **{formatted_date}** está configurada para ser ignorada na cobrança de daily.",
                     ephemeral=True
                 )
             else:
                 await interaction.response.send_message(
-                    f"ℹ️ A data **{date_obj.strftime('%d/%m/%Y')}** NÃO está configurada para ser ignorada na cobrança de daily.",
+                    f"ℹ️ A data **{formatted_date}** NÃO está configurada para ser ignorada na cobrança de daily.",
                     ephemeral=True
                 )
 
             log_command("INFO", interaction.user, f"/testar-datas-ignoradas data={data}", f"Resultado: {is_ignored}")
         except ValueError:
             await interaction.response.send_message(
-                f"⚠️ Formato de data inválido: {data}. Use o formato YYYY-MM-DD.",
+                f"⚠️ Erro ao processar a data: {data}.",
                 ephemeral=True
             )
-            log_command("ERRO", interaction.user, f"/testar-datas-ignoradas data={data}", "Formato de data inválido")
+            log_command("ERRO", interaction.user, f"/testar-datas-ignoradas data={data}", "Erro ao processar data")
 
     @app_commands.command(name="cobrar_daily", description="Cobra as atualizações diárias pendentes. (Somente POs e Admins)")
     async def cobrar_daily(self, interaction: discord.Interaction):
@@ -1355,7 +1369,7 @@ class DailyCommands(commands.Cog):
         return True
 
     @app_commands.command(name="daily", description="Envia ou atualiza sua atualização diária")
-    @app_commands.describe(data="Data opcional no formato YYYY-MM-DD (padrão: dia anterior)")
+    @app_commands.describe(data="Data opcional (formatos aceitos: YYYY-MM-DD, YYYY/MM/DD ou DD/MM/YYYY)")
     async def daily_update(
         self,
         interaction: discord.Interaction,
@@ -1366,7 +1380,7 @@ class DailyCommands(commands.Cog):
 
         Args:
             interaction: A interação do Discord.
-            data: Data opcional no formato YYYY-MM-DD.
+            data: Data opcional nos formatos YYYY-MM-DD, YYYY/MM/DD ou DD/MM/YYYY.
         """
         if not await self._check_daily_enabled(interaction):
             return
@@ -1396,9 +1410,19 @@ class DailyCommands(commands.Cog):
             except (discord.NotFound, discord.Forbidden, ValueError):
                 pass
 
+        formatted_data = None
         if data:
+            formatted_data = parse_date_string(data)
+            if not formatted_data:
+                await interaction.response.send_message(
+                    f"⚠️ Formato de data inválido: {data}. Formatos aceitos: YYYY-MM-DD, YYYY/MM/DD ou DD/MM/YYYY.",
+                    ephemeral=True
+                )
+                log_command("ERRO", interaction.user, f"/daily data={data}", "Formato de data inválido")
+                return
+
             try:
-                date_obj = datetime.strptime(data, "%Y-%m-%d")
+                date_obj = datetime.strptime(formatted_data, "%Y-%m-%d")
 
                 today = get_br_time().date()
                 if date_obj.date() > today:
@@ -1410,15 +1434,15 @@ class DailyCommands(commands.Cog):
                     return
             except ValueError:
                 await interaction.response.send_message(
-                    f"⚠️ Formato de data inválido: {data}. Use o formato YYYY-MM-DD.",
+                    f"⚠️ Erro ao processar a data: {data}.",
                     ephemeral=True
                 )
-                log_command("ERRO", interaction.user, f"/daily data={data}", "Formato de data inválido")
+                log_command("ERRO", interaction.user, f"/daily data={data}", "Erro ao processar data")
                 return
 
-        if has_submitted_daily_update(user_id, data):
-            if data:
-                date_obj = datetime.strptime(data, "%Y-%m-%d")
+        if has_submitted_daily_update(user_id, formatted_data):
+            if formatted_data:
+                date_obj = datetime.strptime(formatted_data, "%Y-%m-%d")
                 date_obj = date_obj.replace(tzinfo=BRAZIL_TIMEZONE)
                 formatted_date = date_obj.strftime("%d/%m/%Y")
             else:
@@ -1440,14 +1464,14 @@ class DailyCommands(commands.Cog):
             command_details = f"/daily{f' data={data}' if data else ''}"
             log_command("DAILY UPDATE", interaction.user, command_details, "Usuário já enviou atualização para esta data")
 
-            view = DailyUpdateView(interaction.user, data)
+            view = DailyUpdateView(interaction.user, formatted_data)
             await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
             return
 
         command_details = f"/daily{f' data={data}' if data else ''}"
         log_command("COMANDO", interaction.user, command_details, "Iniciando modal de daily update")
 
-        await interaction.response.send_modal(DailyUpdateModal(data, interaction.user))
+        await interaction.response.send_modal(DailyUpdateModal(formatted_data, interaction.user))
 
     @app_commands.command(name="ver-daily", description="Visualiza suas atualizações diárias")
     @app_commands.describe(periodo="Período para visualizar (hoje, semana, mes)")
@@ -1534,8 +1558,8 @@ class DailyCommands(commands.Cog):
 
     @app_commands.command(name="relatorio-daily", description="Visualiza as atualizações diárias de todos os usuários")
     @app_commands.describe(
-        data_inicial="Data inicial no formato YYYY-MM-DD (padrão: 30 dias atrás)",
-        data_final="Data final no formato YYYY-MM-DD (padrão: hoje)"
+        data_inicial="Data inicial (formatos aceitos: YYYY-MM-DD, YYYY/MM/DD ou DD/MM/YYYY)",
+        data_final="Data final (formatos aceitos: YYYY-MM-DD, YYYY/MM/DD ou DD/MM/YYYY)"
     )
     async def report_daily(
         self,
@@ -1548,10 +1572,13 @@ class DailyCommands(commands.Cog):
 
         Args:
             interaction: A interação do Discord.
-            data_inicial: Data inicial no formato YYYY-MM-DD (padrão: 30 dias atrás).
-            data_final: Data final no formato YYYY-MM-DD (padrão: hoje).
+            data_inicial: Data inicial nos formatos YYYY-MM-DD, YYYY/MM/DD ou DD/MM/YYYY (padrão: 30 dias atrás).
+            data_final: Data final nos formatos YYYY-MM-DD, YYYY/MM/DD ou DD/MM/YYYY (padrão: hoje).
         """
         logger.debug(f"[DEBUG] Iniciando comando relatorio-daily: data_inicial={data_inicial}, data_final={data_final}")
+
+        if not await self._check_daily_enabled(interaction):
+            return
 
         admin_role_id = int(get_env("ADMIN_ROLE_ID"))
         has_permission = False
@@ -1567,41 +1594,65 @@ class DailyCommands(commands.Cog):
 
         if not has_permission:
             await interaction.response.send_message(
-                "⚠️ Você não tem permissão para usar este comando. Apenas administradores e Product Owners podem ver relatórios de atualizações diárias.",
+                "⚠️ Você não tem permissão para usar este comando. Apenas administradores e Product Owners podem ver relatórios.",
                 ephemeral=True
             )
             log_command("PERMISSÃO NEGADA", interaction.user, f"/relatorio-daily data_inicial={data_inicial} data_final={data_final}")
             return
 
         today = get_br_time().date()
-        if data_final is None:
-            data_final = today.strftime("%Y-%m-%d")
 
-        if data_inicial is None:
-            data_inicial = (today - timedelta(days=30)).strftime("%Y-%m-%d")
+        if data_inicial:
+            formatted_data_inicial = parse_date_string(data_inicial)
+            if not formatted_data_inicial:
+                await interaction.response.send_message(
+                    f"⚠️ Formato de data inicial inválido: {data_inicial}. Formatos aceitos: YYYY-MM-DD, YYYY/MM/DD ou DD/MM/YYYY.",
+                    ephemeral=True
+                )
+                log_command("ERRO", interaction.user, f"/relatorio-daily data_inicial={data_inicial} data_final={data_final}", "Formato de data inicial inválido")
+                return
+            start_date = formatted_data_inicial
+        else:
+            start_date = (today - timedelta(days=30)).strftime("%Y-%m-%d")
 
-        logger.debug(f"[DEBUG] Datas calculadas: data_inicial={data_inicial}, data_final={data_final}")
+        if data_final:
+            formatted_data_final = parse_date_string(data_final)
+            if not formatted_data_final:
+                await interaction.response.send_message(
+                    f"⚠️ Formato de data final inválido: {data_final}. Formatos aceitos: YYYY-MM-DD, YYYY/MM/DD ou DD/MM/YYYY.",
+                    ephemeral=True
+                )
+                log_command("ERRO", interaction.user, f"/relatorio-daily data_inicial={data_inicial} data_final={data_final}", "Formato de data final inválido")
+                return
+            end_date = formatted_data_final
+        else:
+            end_date = today.strftime("%Y-%m-%d")
 
         try:
-            start_date_obj = datetime.strptime(data_inicial, "%Y-%m-%d")
-            end_date_obj = datetime.strptime(data_final, "%Y-%m-%d")
+            start_date_obj = datetime.strptime(start_date, "%Y-%m-%d").date()
+            end_date_obj = datetime.strptime(end_date, "%Y-%m-%d").date()
 
             if start_date_obj > end_date_obj:
                 await interaction.response.send_message(
-                    "⚠️ A data inicial deve ser anterior ou igual à data final.",
+                    "⚠️ A data inicial não pode ser posterior à data final.",
                     ephemeral=True
                 )
-                log_command("ERRO", interaction.user, f"/relatorio-daily data_inicial={data_inicial} data_final={data_final}",
-                           "Data inicial posterior à data final")
+                log_command("ERRO", interaction.user, f"/relatorio-daily data_inicial={data_inicial} data_final={data_final}", "Data inicial posterior à final")
                 return
 
+            if (end_date_obj - start_date_obj).days > 60:
+                await interaction.response.send_message(
+                    "⚠️ O período máximo para relatórios é de 60 dias.",
+                    ephemeral=True
+                )
+                log_command("ERRO", interaction.user, f"/relatorio-daily data_inicial={data_inicial} data_final={data_final}", "Período muito longo")
+                return
         except ValueError:
             await interaction.response.send_message(
                 "⚠️ Formato de data inválido. Use o formato YYYY-MM-DD.",
                 ephemeral=True
             )
-            log_command("ERRO", interaction.user, f"/relatorio-daily data_inicial={data_inicial} data_final={data_final}",
-                       "Formato de data inválido")
+            log_command("ERRO", interaction.user, f"/relatorio-daily data_inicial={data_inicial} data_final={data_final}", "Formato de data inválido")
             return
 
         await interaction.response.defer(ephemeral=True)
@@ -1609,12 +1660,12 @@ class DailyCommands(commands.Cog):
                    "Iniciando geração do relatório")
 
         logger.debug(f"[DEBUG] Buscando atualizações diárias no banco de dados...")
-        all_updates = get_all_daily_updates(data_inicial, data_final)
+        all_updates = get_all_daily_updates(start_date, end_date)
         logger.debug(f"[DEBUG] Quantidade de usuários com updates: {len(all_updates)}")
 
         if not all_updates:
             await interaction.followup.send(
-                f"📝 Não há atualizações diárias registradas no período de {data_inicial} a {data_final}.",
+                f"📝 Não há atualizações diárias registradas no período de {start_date} a {end_date}.",
                 ephemeral=True
             )
             log_command("INFO", interaction.user, f"/relatorio-daily data_inicial={data_inicial} data_final={data_final}",
@@ -1777,7 +1828,7 @@ class DailyCommands(commands.Cog):
                 update_counts[update_date] += 1
 
             summary_data = [
-                ["Período do relatório", f"{data_inicial} a {data_final}"],
+                ["Período do relatório", f"{start_date} a {end_date}"],
                 ["Total de atualizações", len(sorted_updates)],
                 ["Total de usuários", len(unique_users)],
                 ["Média de atualizações por usuário", f"{len(sorted_updates)/len(unique_users):.2f}" if unique_users else "0"]
@@ -1792,7 +1843,7 @@ class DailyCommands(commands.Cog):
         except Exception as e:
             logger.error(f"[DEBUG] Erro ao formatar planilha: {str(e)}")
 
-        file_name = f"relatorio_daily_{data_inicial}_{data_final}.xlsx"
+        file_name = f"relatorio_daily_{start_date}_{end_date}.xlsx"
 
         try:
             logger.debug(f"[DEBUG] Salvando planilha em {file_name}")
@@ -1811,7 +1862,7 @@ class DailyCommands(commands.Cog):
         try:
             logger.debug(f"[DEBUG] Enviando arquivo {file_name} para o Discord")
             await interaction.followup.send(
-                content=f"📊 Relatório de atualizações diárias ({data_inicial} a {data_final})",
+                content=f"📊 Relatório de atualizações diárias ({start_date} a {end_date})",
                 file=discord.File(file_name),
                 ephemeral=True
             )

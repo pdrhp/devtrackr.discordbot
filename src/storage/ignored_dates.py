@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Tuple, Union
 
 from src.storage.database import get_connection
-from src.utils.config import get_br_time
+from src.utils.config import get_br_time, parse_date_string
 
 logger = logging.getLogger('team_analysis_bot')
 
@@ -124,19 +124,21 @@ def get_all_ignored_dates() -> List[Dict[str, Union[int, str]]]:
 
 def parse_date_config(date_config: str) -> List[Tuple[str, str]]:
     """
-    Analisa uma string de configuração de datas ignoradas e retorna uma lista de tuplas (data_inicial, data_final).
-
-    Formatos aceitos:
-    - "2023-12-25" - data única (será tratada como intervalo do mesmo dia)
-    - "2023-12-25,2023-12-26" - múltiplas datas únicas separadas por vírgula
-    - "2023-12-24-2024-01-03" - intervalo de datas (do primeiro ao segundo dia)
-    - Combinação dos formatos acima separados por vírgula
+    Processa uma string de configuração de datas ignoradas.
+    Aceita formatos:
+    - YYYY-MM-DD (data única)
+    - YYYY/MM/DD (data única)
+    - DD/MM/YYYY (data única)
+    - YYYY-MM-DD-YYYY-MM-DD (intervalo)
+    - YYYY/MM/DD-YYYY/MM/DD (intervalo)
+    - DD/MM/YYYY-DD/MM/YYYY (intervalo)
+    Também aceita listas separadas por vírgula.
 
     Args:
-        date_config: String com configuração de datas
+        date_config: String com configuração de datas a ignorar.
 
     Returns:
-        List[Tuple[str, str]]: Lista de tuplas (data_inicial, data_final)
+        Lista de tuplas (start_date, end_date) no formato YYYY-MM-DD.
     """
     result = []
     if not date_config or not date_config.strip():
@@ -149,32 +151,28 @@ def parse_date_config(date_config: str) -> List[Tuple[str, str]]:
     for part in parts:
         logger.info(f"Processando parte: '{part}'")
 
-        if part.count('-') == 2:
+        if '-' in part and part.count('-') >= 1:
             try:
-                datetime.strptime(part, "%Y-%m-%d")
-                result.append((part, part))
-                logger.info(f"Data única válida: {part}")
-            except ValueError as e:
-                logger.warning(f"Formato de data único inválido: {part} - {str(e)}")
+                date_parts = part.split('-', 1)
 
-        elif part.count('-') > 2:
-            try:
-                date_parts = part.split('-')
-                if len(date_parts) == 6:
-                    start_date = f"{date_parts[0]}-{date_parts[1]}-{date_parts[2]}"
-                    end_date = f"{date_parts[3]}-{date_parts[4]}-{date_parts[5]}"
+                if len(date_parts) == 2:
+                    start_date_str = date_parts[0].strip()
+                    end_date_str = date_parts[1].strip()
 
-                    datetime.strptime(start_date, "%Y-%m-%d")
-                    datetime.strptime(end_date, "%Y-%m-%d")
+                    start_date = parse_date_string(start_date_str)
+                    end_date = parse_date_string(end_date_str)
 
-                    result.append((start_date, end_date))
-                    logger.info(f"Intervalo válido: {start_date} até {end_date}")
-                else:
-                    logger.warning(f"Formato de intervalo inválido (número incorreto de partes): {part}")
-            except ValueError as e:
-                logger.warning(f"Erro validando intervalo de datas: {part} - {str(e)}")
+                    if start_date and end_date:
+                        result.append((start_date, end_date))
+                        logger.info(f"Intervalo válido: {start_date} até {end_date}")
+                        continue
             except Exception as e:
-                logger.warning(f"Erro ao processar intervalo de datas: {part} - {str(e)}")
+                logger.warning(f"Erro ao processar possível intervalo de datas: {part} - {str(e)}")
+
+        standardized_date = parse_date_string(part)
+        if standardized_date:
+            result.append((standardized_date, standardized_date))
+            logger.info(f"Data única válida: {standardized_date}")
         else:
             logger.warning(f"Formato não reconhecido: {part}")
 
