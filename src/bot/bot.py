@@ -5,7 +5,6 @@ from logging.handlers import RotatingFileHandler
 
 import discord
 from discord.ext import commands
-from discord import app_commands
 
 from src.bot.changelog import check_and_send_changelog
 
@@ -75,8 +74,8 @@ class TeamAnalysisBot(commands.Bot):
         """Configura o bot antes de iniciar."""
         logger.info("Configurando extensões do bot...")
 
-        from src.bot import commands
-        await commands.setup(self)
+        from src.bot.commands import setup
+        await setup(self)
 
         from src.bot import tasks
         await tasks.setup(self)
