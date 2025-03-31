@@ -1186,6 +1186,9 @@ class UserCommands(commands.Cog):
             interaction: A interação do Discord.
             tipo: Tipo de usuário a listar.
         """
+        logger = logging.getLogger('team_analysis_bot')
+        logger.debug(f"Comando listar-usuarios iniciado com tipo={tipo}")
+
         admin_role_id = int(get_env("ADMIN_ROLE_ID"))
         has_permission = False
 
@@ -1194,53 +1197,101 @@ class UserCommands(commands.Cog):
         else:
             has_permission = any(role.id == admin_role_id for role in interaction.user.roles)
 
+        logger.debug(f"Verificação de permissão: admin_role_id={admin_role_id}, has_permission={has_permission}")
+
         if not has_permission:
             await interaction.response.send_message(
                 "⚠️ Você não tem permissão para usar este comando.",
                 ephemeral=True
             )
             log_command("PERMISSÃO NEGADA", interaction.user, f"/listar-usuarios tipo={tipo}")
+            logger.warning(f"Permissão negada para {interaction.user.name} (ID: {interaction.user.id}) no comando listar-usuarios")
             return
 
-        users = get_users_by_role(tipo)
+        logger.debug(f"Obtendo usuários do tipo: {tipo}")
+        try:
+            users = get_users_by_role(tipo)
+            logger.debug(f"Retornados {len(users) if users else 0} usuários")
 
-        if not users:
+            if not users:
+                await interaction.response.send_message(
+                    f"⚠️ Não há usuários do tipo '{tipo}' registrados.",
+                    ephemeral=True
+                )
+                log_command("INFO", interaction.user, f"/listar-usuarios tipo={tipo}", "Nenhum usuário encontrado")
+                logger.info(f"Nenhum usuário do tipo '{tipo}' encontrado")
+                return
+
+            logger.debug("Iniciando processamento dos usuários para exibição")
+            user_strings = []
+            for i, user_data in enumerate(users):
+                user_id = user_data["user_id"]
+                logger.debug(f"Processando usuário {i+1}/{len(users)}: ID={user_id}")
+
+                try:
+                    user = await self.bot.fetch_user(int(user_id))
+                    display_name = user.display_name
+                    user_string = f"• {user.mention} ({display_name})"
+                    logger.debug(f"Usuário {user_id} encontrado: {display_name}")
+                except Exception as e:
+                    user_string = f"• ID: {user_id} (Usuário não encontrado)"
+                    logger.error(f"Erro ao buscar usuário {user_id}: {str(e)}")
+
+                user_strings.append(user_string)
+
+            tipo_display = {
+                "teammember": "Team Members",
+                "po": "Product Owners",
+                "all": "Todos os Usuários"
+            }.get(tipo, tipo)
+
+            logger.debug(f"Criando embed com {len(user_strings)} usuários")
+
+            if len("\n".join(user_strings)) > 4000:
+                logger.warning(f"Lista de usuários muito grande ({len(user_strings)} usuários), dividindo em múltiplas mensagens")
+
+                page_size = 20
+                pages = [user_strings[i:i + page_size] for i in range(0, len(user_strings), page_size)]
+                logger.debug(f"Lista dividida em {len(pages)} páginas")
+
+                for i, page in enumerate(pages):
+                    page_embed = discord.Embed(
+                        title=f"📋 Lista de Usuários: {tipo_display} - Página {i+1}/{len(pages)}",
+                        description="\n".join(page),
+                        color=discord.Color.blue()
+                    )
+                    page_embed.set_footer(text=f"Total: {len(users)} usuários (Mostrando {i*page_size+1}-{min((i+1)*page_size, len(users))})")
+
+                    if i == 0:
+                        await interaction.response.send_message(embed=page_embed, ephemeral=True)
+                        logger.debug(f"Enviada página 1/{len(pages)}")
+                    else:
+                        await interaction.followup.send(embed=page_embed, ephemeral=True)
+                        logger.debug(f"Enviada página {i+1}/{len(pages)}")
+
+                log_command("LISTAGEM", interaction.user, f"/listar-usuarios tipo={tipo}", f"Listados {len(users)} usuários em {len(pages)} páginas")
+                logger.info(f"Listados {len(users)} usuários do tipo '{tipo}' em {len(pages)} páginas para {interaction.user.name} (ID: {interaction.user.id})")
+            else:
+                embed = discord.Embed(
+                    title=f"📋 Lista de Usuários: {tipo_display}",
+                    description="\n".join(user_strings) if user_strings else "Nenhum usuário encontrado.",
+                    color=discord.Color.blue()
+                )
+
+                embed.set_footer(text=f"Total: {len(users)} usuários")
+
+                logger.debug("Enviando resposta com a lista de usuários")
+                await interaction.response.send_message(embed=embed, ephemeral=True)
+                log_command("LISTAGEM", interaction.user, f"/listar-usuarios tipo={tipo}", f"Listados {len(users)} usuários")
+                logger.info(f"Listados {len(users)} usuários do tipo '{tipo}' para {interaction.user.name} (ID: {interaction.user.id})")
+
+        except Exception as e:
+            logger.error(f"Erro não tratado no comando listar-usuarios: {str(e)}", exc_info=True)
             await interaction.response.send_message(
-                f"⚠️ Não há usuários do tipo '{tipo}' registrados.",
+                f"⚠️ Ocorreu um erro ao processar o comando. Por favor, tente novamente mais tarde ou contate o suporte.",
                 ephemeral=True
             )
-            log_command("INFO", interaction.user, f"/listar-usuarios tipo={tipo}", "Nenhum usuário encontrado")
-            return
-
-        user_strings = []
-        for user_data in users:
-            user_id = user_data["user_id"]
-
-            try:
-                user = await self.bot.fetch_user(int(user_id))
-                display_name = user.display_name
-                user_string = f"• {user.mention} ({display_name})"
-            except:
-                user_string = f"• ID: {user_id} (Usuário não encontrado)"
-
-            user_strings.append(user_string)
-
-        tipo_display = {
-            "teammember": "Team Members",
-            "po": "Product Owners",
-            "all": "Todos os Usuários"
-        }.get(tipo, tipo)
-
-        embed = discord.Embed(
-            title=f"📋 Lista de Usuários: {tipo_display}",
-            description="\n".join(user_strings) if user_strings else "Nenhum usuário encontrado.",
-            color=discord.Color.blue()
-        )
-
-        embed.set_footer(text=f"Total: {len(users)} usuários")
-
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-        log_command("LISTAGEM", interaction.user, f"/listar-usuarios tipo={tipo}", f"Listados {len(users)} usuários")
+            log_command("ERRO", interaction.user, f"/listar-usuarios tipo={tipo}", f"Erro: {str(e)}")
 
 
 class DailyUpdateModal(ui.Modal, title="Atualização Diária"):

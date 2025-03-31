@@ -1,0 +1,20 @@
+version: "0.0.6"
+release_date: "2025-03-31"
+title: "Observabilidade e Diagnóstico no comando de listagem de usuários - Versão 0.0.6"
+description: "Melhorias na observabilidade e diagnóstico de erros, especialmente para o comando de listagem de usuários."
+
+changes:
+  melhorado:
+    - "Adicionados logs detalhados para melhor diagnóstico de problemas em produção"
+    - "Implementada paginação para exibição de grandes volumes de dados"
+    - "Tratamento robusto de exceções durante processamento de comandos"
+
+  corrigido:
+    - "Adicionada verificação de tamanho para evitar ultrapassar limites do Discord"
+
+notes: |
+  Esta atualização foca em melhorar a capacidade de diagnosticar problemas em ambiente de
+  produção através de logs mais detalhados e tratamento de erros mais robusto.
+
+  A experiência do usuário também foi aprimorada com melhor exibição de grandes volumes
+  de dados através de paginação automática.

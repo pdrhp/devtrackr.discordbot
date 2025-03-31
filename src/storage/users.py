@@ -1,6 +1,7 @@
 import sqlite3
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple, Any
+import logging
 
 from src.storage.database import get_connection
 
@@ -98,20 +99,40 @@ def get_users_by_role(role: str) -> List[Dict[str, Any]]:
     Returns:
         List[Dict[str, Any]]: Lista de usuários com o papel especificado.
     """
+    logger = logging.getLogger('team_analysis_bot')
+
+    logger.debug(f"Iniciando busca de usuários com papel '{role}'")
+
     conn = get_connection()
     cursor = conn.cursor()
 
     try:
-        cursor.execute("SELECT * FROM users WHERE role = ?", (role,))
+        if role == "all":
+            logger.debug("Buscando todos os usuários (all)")
+            cursor.execute("SELECT * FROM users")
+        else:
+            logger.debug(f"Buscando usuários com papel específico: {role}")
+            cursor.execute("SELECT * FROM users WHERE role = ?", (role,))
+
         users = cursor.fetchall()
 
-        return [dict(user) for user in users]
+        if users:
+            logger.debug(f"Encontrados {len(users)} usuários com papel '{role}'")
+        else:
+            logger.debug(f"Nenhum usuário encontrado com papel '{role}'")
 
-    except sqlite3.Error:
+        result = [dict(user) for user in users]
+        logger.debug(f"Lista convertida para dicionários com {len(result)} itens")
+
+        return result
+
+    except sqlite3.Error as e:
+        logger.error(f"Erro ao buscar usuários com papel '{role}': {str(e)}")
         return []
 
     finally:
         conn.close()
+        logger.debug("Conexão com o banco de dados fechada")
 
 
 def remove_user(user_id: str) -> Tuple[bool, str]:
