@@ -1,0 +1,27 @@
+version: "0.0.7"
+release_date: "2023-10-29"
+title: "Otimização do Comando Listar-Usuários - Versão 0.0.7"
+description: "Correção e otimização do comando de listagem de usuários para servidores com muitos membros."
+
+changes:
+  corrigido:
+    - "Resolvido erro de timeout no comando /listar-usuarios em servidores com muitos usuários registrados"
+    - "Corrigido problema de expiração da interação durante o processamento de listas grandes"
+
+  melhorado:
+    - "Otimizada a busca de usuários para maior desempenho em servidores grandes"
+    - "Implementada resposta deferida para melhor experiência do usuário durante processamentos longos"
+    - "Adicionado processamento em lotes para acelerar consultas de usuários"
+
+  alterado:
+    - "Aprimorada a ordem de busca de usuários para priorizar métodos mais rápidos"
+    - "Refinado o sistema de logs para fornecer mais informações sobre o progresso de processamento"
+
+notes: |
+  Esta atualização resolve problemas de desempenho no comando /listar-usuarios quando
+  executado em servidores com grande número de usuários registrados. A implementação
+  anterior poderia falhar com erro de timeout quando a resposta não era enviada dentro
+  do limite de tempo do Discord (3 segundos).
+
+  A nova implementação utiliza processamento assíncrono otimizado e notifica o Discord
+  que a resposta será enviada posteriormente, eliminando o problema de timeout.

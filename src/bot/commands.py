@@ -1208,13 +1208,16 @@ class UserCommands(commands.Cog):
             logger.warning(f"Permissão negada para {interaction.user.name} (ID: {interaction.user.id}) no comando listar-usuarios")
             return
 
-        logger.debug(f"Obtendo usuários do tipo: {tipo}")
+        await interaction.response.defer(ephemeral=True)
+        logger.debug("Resposta deferida para evitar timeout")
+
         try:
+            logger.debug(f"Obtendo usuários do tipo: {tipo}")
             users = get_users_by_role(tipo)
             logger.debug(f"Retornados {len(users) if users else 0} usuários")
 
             if not users:
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     f"⚠️ Não há usuários do tipo '{tipo}' registrados.",
                     ephemeral=True
                 )
@@ -1224,20 +1227,47 @@ class UserCommands(commands.Cog):
 
             logger.debug("Iniciando processamento dos usuários para exibição")
             user_strings = []
-            for i, user_data in enumerate(users):
-                user_id = user_data["user_id"]
-                logger.debug(f"Processando usuário {i+1}/{len(users)}: ID={user_id}")
 
-                try:
-                    user = await self.bot.fetch_user(int(user_id))
-                    display_name = user.display_name
-                    user_string = f"• {user.mention} ({display_name})"
-                    logger.debug(f"Usuário {user_id} encontrado: {display_name}")
-                except Exception as e:
-                    user_string = f"• ID: {user_id} (Usuário não encontrado)"
-                    logger.error(f"Erro ao buscar usuário {user_id}: {str(e)}")
+            guild = interaction.guild
 
-                user_strings.append(user_string)
+            batch_size = 5
+            total_users = len(users)
+
+            for i in range(0, total_users, batch_size):
+                batch = users[i:i+batch_size]
+                batch_strings = []
+
+                for j, user_data in enumerate(batch):
+                    user_id = user_data["user_id"]
+                    user_index = i + j
+                    logger.debug(f"Processando usuário {user_index+1}/{total_users}: ID={user_id}")
+
+                    try:
+                        if guild:
+                            member = guild.get_member(int(user_id))
+                            if member:
+                                display_name = member.display_name
+                                user_string = f"• {member.mention} ({display_name})"
+                                logger.debug(f"Usuário {user_id} encontrado localmente: {display_name}")
+                                batch_strings.append(user_string)
+                                continue
+
+                        user = await self.bot.fetch_user(int(user_id))
+                        display_name = user.display_name
+                        user_string = f"• {user.mention} ({display_name})"
+                        logger.debug(f"Usuário {user_id} encontrado via API: {display_name}")
+
+                    except Exception as e:
+                        user_string = f"• ID: {user_id} (Usuário não encontrado)"
+                        logger.error(f"Erro ao buscar usuário {user_id}: {str(e)}")
+
+                    batch_strings.append(user_string)
+
+                user_strings.extend(batch_strings)
+
+                if (i + batch_size) % 10 == 0 and i > 0 and i + batch_size < total_users:
+                    progress = min(100, int(((i + batch_size) / total_users) * 100))
+                    logger.debug(f"Progresso: {progress}% ({i + batch_size}/{total_users})")
 
             tipo_display = {
                 "teammember": "Team Members",
@@ -1262,12 +1292,8 @@ class UserCommands(commands.Cog):
                     )
                     page_embed.set_footer(text=f"Total: {len(users)} usuários (Mostrando {i*page_size+1}-{min((i+1)*page_size, len(users))})")
 
-                    if i == 0:
-                        await interaction.response.send_message(embed=page_embed, ephemeral=True)
-                        logger.debug(f"Enviada página 1/{len(pages)}")
-                    else:
-                        await interaction.followup.send(embed=page_embed, ephemeral=True)
-                        logger.debug(f"Enviada página {i+1}/{len(pages)}")
+                    await interaction.followup.send(embed=page_embed, ephemeral=True)
+                    logger.debug(f"Enviada página {i+1}/{len(pages)}")
 
                 log_command("LISTAGEM", interaction.user, f"/listar-usuarios tipo={tipo}", f"Listados {len(users)} usuários em {len(pages)} páginas")
                 logger.info(f"Listados {len(users)} usuários do tipo '{tipo}' em {len(pages)} páginas para {interaction.user.name} (ID: {interaction.user.id})")
@@ -1281,14 +1307,14 @@ class UserCommands(commands.Cog):
                 embed.set_footer(text=f"Total: {len(users)} usuários")
 
                 logger.debug("Enviando resposta com a lista de usuários")
-                await interaction.response.send_message(embed=embed, ephemeral=True)
+                await interaction.followup.send(embed=embed, ephemeral=True)
                 log_command("LISTAGEM", interaction.user, f"/listar-usuarios tipo={tipo}", f"Listados {len(users)} usuários")
                 logger.info(f"Listados {len(users)} usuários do tipo '{tipo}' para {interaction.user.name} (ID: {interaction.user.id})")
 
         except Exception as e:
             logger.error(f"Erro não tratado no comando listar-usuarios: {str(e)}", exc_info=True)
-            await interaction.response.send_message(
-                f"⚠️ Ocorreu um erro ao processar o comando. Por favor, tente novamente mais tarde ou contate o suporte.",
+            await interaction.followup.send(
+                f"⚠️ Ocorreu um erro ao processar o comando: {str(e)}",
                 ephemeral=True
             )
             log_command("ERRO", interaction.user, f"/listar-usuarios tipo={tipo}", f"Erro: {str(e)}")
