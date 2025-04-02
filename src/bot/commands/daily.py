@@ -15,7 +15,7 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
 from src.storage.feature_toggle import is_feature_enabled
-from src.storage.users import get_user, get_users_by_role, check_user_is_po
+from src.storage.users import get_user, get_users_by_role, check_user_is_po, get_user_display_name
 from src.storage.daily import submit_daily_update, has_submitted_daily_update, get_user_daily_updates, get_all_daily_updates
 from src.utils.config import get_env, get_br_time, BRAZIL_TIMEZONE, log_command, parse_date_string
 from src.bot.modals import DailyUpdateModal
@@ -387,7 +387,8 @@ class DailyCommands(commands.Cog):
             for user in users:
                 all_users[user["user_id"]] = {
                     "role": role,
-                    "name": user["user_name"]
+                    "name": get_user_display_name(user["user_id"], user),
+                    "user_obj": user  # Armazenar o objeto completo para uso posterior
                 }
 
         logger.debug(f"[DEBUG] Recuperados {len(all_users)} usuários no total")
@@ -432,7 +433,17 @@ class DailyCommands(commands.Cog):
 
                 try:
                     user_obj = await self.bot.fetch_user(int(user_id))
-                    user_name = user_obj.display_name
+                    discord_name = user_obj.display_name
+
+                    user_data = all_users.get(user_id, {})
+                    stored_user_obj = user_data.get("user_obj")
+
+                    if stored_user_obj:
+                        user_name = get_user_display_name(user_id, stored_user_obj)
+                        if user_name != discord_name:
+                            user_name = f"{discord_name} ({user_name})"
+                    else:
+                        user_name = discord_name
                 except Exception as e:
                     logger.warning(f"[DEBUG] Não foi possível buscar usuário Discord {user_id}: {str(e)}")
                     user_name = all_users.get(user_id, {}).get("name", f"Usuário {user_id}")

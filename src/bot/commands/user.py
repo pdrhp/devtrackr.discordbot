@@ -6,7 +6,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from src.utils.config import get_env, log_command
-from src.storage.users import get_users_by_role
+from src.storage.users import get_users_by_role, get_user
 
 logger = logging.getLogger('team_analysis_bot')
 
@@ -37,25 +37,6 @@ class UserCommands(commands.Cog):
         """
         logger = logging.getLogger('team_analysis_bot')
         logger.debug(f"Comando listar-usuarios iniciado com tipo={tipo}")
-
-        admin_role_id = int(get_env("ADMIN_ROLE_ID"))
-        has_permission = False
-
-        if admin_role_id == 0:
-            has_permission = interaction.user.guild_permissions.administrator
-        else:
-            has_permission = any(role.id == admin_role_id for role in interaction.user.roles)
-
-        logger.debug(f"Verificação de permissão: admin_role_id={admin_role_id}, has_permission={has_permission}")
-
-        if not has_permission:
-            await interaction.response.send_message(
-                "⚠️ Você não tem permissão para usar este comando.",
-                ephemeral=True
-            )
-            log_command("PERMISSÃO NEGADA", interaction.user, f"/listar-usuarios tipo={tipo}")
-            logger.warning(f"Permissão negada para {interaction.user.name} (ID: {interaction.user.id}) no comando listar-usuarios")
-            return
 
         await interaction.response.defer(ephemeral=True)
         logger.debug("Resposta deferida para evitar timeout")
@@ -91,23 +72,34 @@ class UserCommands(commands.Cog):
                     user_index = i + j
                     logger.debug(f"Processando usuário {user_index+1}/{total_users}: ID={user_id}")
 
+                    nickname = user_data.get("nickname")
+
                     try:
                         if guild:
                             member = guild.get_member(int(user_id))
                             if member:
                                 display_name = member.display_name
-                                user_string = f"• {member.mention} ({display_name})"
+                                if nickname:
+                                    user_string = f"• {member.mention} ({display_name}) - ({nickname})"
+                                else:
+                                    user_string = f"• {member.mention} ({display_name})"
                                 logger.debug(f"Usuário {user_id} encontrado localmente: {display_name}")
                                 batch_strings.append(user_string)
                                 continue
 
                         user = await self.bot.fetch_user(int(user_id))
                         display_name = user.display_name
-                        user_string = f"• {user.mention} ({display_name})"
+                        if nickname:
+                            user_string = f"• {user.mention} ({display_name}) - ({nickname})"
+                        else:
+                            user_string = f"• {user.mention} ({display_name})"
                         logger.debug(f"Usuário {user_id} encontrado via API: {display_name}")
 
                     except Exception as e:
-                        user_string = f"• ID: {user_id} (Usuário não encontrado)"
+                        if nickname:
+                            user_string = f"• ID: {user_id} (Usuário não encontrado) - ({nickname})"
+                        else:
+                            user_string = f"• ID: {user_id} (Usuário não encontrado)"
                         logger.error(f"Erro ao buscar usuário {user_id}: {str(e)}")
 
                     batch_strings.append(user_string)
