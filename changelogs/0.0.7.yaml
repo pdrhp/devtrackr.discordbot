@@ -1,5 +1,5 @@
 version: "0.0.7"
-release_date: "2023-10-29"
+release_date: "2025-03-31"
 title: "Otimização do Comando Listar-Usuários - Versão 0.0.7"
 description: "Correção e otimização do comando de listagem de usuários para servidores com muitos membros."
 
