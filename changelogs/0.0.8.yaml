@@ -1,0 +1,29 @@
+version: "0.0.8"
+release_date: "2025-04-01"
+title: "Sistema de Apelidos e Refatoração da Base de Código - Versão 0.0.8"
+description: "Esta versão introduz um novo sistema de apelidos para facilitar a identificação dos membros da equipe, além de melhorias significativas na estrutura do código."
+
+changes:
+  adicionado:
+    - "Novo comando /apelidar que permite aos administradores e POs definirem apelidos personalizados para os membros da equipe"
+    - "Integração de apelidos na listagem de usuários e em relatórios, facilitando a identificação de membros"
+    - "Adição de coluna 'nickname' na tabela de usuários para suportar apelidos personalizados"
+
+  melhorado:
+    - "Refatoração da estrutura do código para maior sustentabilidade e manutenibilidade"
+    - "Otimização da recuperação de dados de usuários para reduzir consultas redundantes ao banco de dados"
+    - "Aprimoramento no formato de exibição dos nomes de usuários em todo o sistema, priorizando apelidos quando disponíveis"
+
+  removido:
+    - "Funcionalidade de registro de ponto (comandos /on e /off) removida permanentemente"
+
+notes: |
+  O novo sistema de apelidos resolve o problema de identificação de usuários que possuem nomes muito peculiares no Discord,
+  facilitando a visualização em relatórios e listagens. Administradores e Product Owners podem definir apelidos para qualquer
+  membro da equipe registrado no sistema.
+
+  Os apelidos são exibidos no formato:
+  - Na listagem de usuários: @ do usuário (nome do Discord) - (apelido)
+  - Nos relatórios: nome do Discord (apelido)
+
+  A funcionalidade de registro de ponto foi removida permanentemente.

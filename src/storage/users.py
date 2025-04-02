@@ -61,6 +61,43 @@ def register_user(user_id: str, role_or_name: str, role: str = None, registered_
         conn.close()
 
 
+def update_user_nickname(user_id: str, nickname: str, updated_by: str) -> Tuple[bool, str]:
+    """
+    Atualiza o apelido de um usuário registrado no sistema.
+
+    Args:
+        user_id (str): ID do usuário no Discord.
+        nickname (str): Novo apelido do usuário.
+        updated_by (str): ID do usuário que está atualizando o apelido.
+
+    Returns:
+        Tuple[bool, str]: (Sucesso, Mensagem)
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
+        user = cursor.fetchone()
+
+        if not user:
+            return False, "Usuário não encontrado no sistema."
+
+        cursor.execute(
+            "UPDATE users SET nickname = ? WHERE user_id = ?",
+            (nickname, user_id)
+        )
+        conn.commit()
+
+        return True, f"Apelido do usuário atualizado com sucesso para: {nickname}"
+
+    except sqlite3.Error as e:
+        return False, f"Erro ao atualizar apelido do usuário: {str(e)}"
+
+    finally:
+        conn.close()
+
+
 def get_user(user_id: str) -> Optional[Dict[str, Any]]:
     """
     Obtém informações de um usuário pelo ID.
@@ -197,3 +234,25 @@ def check_user_is_po(user_id: str) -> bool:
     """
     user = get_user(user_id)
     return user is not None and user.get('role') == 'po'
+
+
+def get_user_display_name(user_id: str, user_obj: Optional[Dict[str, Any]] = None) -> str:
+    """
+    Retorna o nome de exibição do usuário, priorizando o apelido se estiver definido.
+
+    Args:
+        user_id (str): ID do usuário no Discord.
+        user_obj (Optional[Dict[str, Any]], optional): Objeto de usuário já carregado,
+                                                     para evitar consulta ao banco.
+
+    Returns:
+        str: Nome de exibição do usuário.
+    """
+    user = user_obj if user_obj is not None else get_user(user_id)
+    if not user:
+        return f"User {user_id}"
+
+    if user.get('nickname'):
+        return user['nickname']
+
+    return user['user_name']

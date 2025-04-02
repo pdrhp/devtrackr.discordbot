@@ -43,11 +43,17 @@ def initialize_database():
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id TEXT NOT NULL UNIQUE,
         user_name TEXT NOT NULL,
+        nickname TEXT,  -- Nome de exibição personalizado, pode ser nulo
         role TEXT NOT NULL,  -- 'teammember' ou 'po'
         registered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         registered_by TEXT NOT NULL
     )
     ''')
+
+    cursor.execute("PRAGMA table_info(users)")
+    columns = [column[1] for column in cursor.fetchall()]
+    if 'nickname' not in columns:
+        cursor.execute('ALTER TABLE users ADD COLUMN nickname TEXT')
 
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS daily_updates (

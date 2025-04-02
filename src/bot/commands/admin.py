@@ -1,5 +1,5 @@
 import logging
-from typing import Dict, List
+from typing import Dict, List, Optional
 import asyncio
 from datetime import datetime, timedelta
 
@@ -10,7 +10,7 @@ from discord.ext import commands
 from src.utils.config import get_env, log_command, get_br_time, BRAZIL_TIMEZONE, parse_date_string, format_date_for_display
 from src.storage.feature_toggle import is_feature_enabled, toggle_feature
 from src.storage.daily import get_missing_updates, clear_all_daily_updates
-from src.storage.users import check_user_is_po, register_user as reg_user, remove_user as rem_user, get_user
+from src.storage.users import check_user_is_po, register_user as reg_user, remove_user as rem_user, get_user, update_user_nickname
 from src.storage.ignored_dates import get_all_ignored_dates, remove_ignored_date, should_ignore_date
 from src.bot.views import ConfigView
 
@@ -780,3 +780,92 @@ class AdminCommands(commands.Cog):
 
         await interaction.followup.send(embed=embed)
         logger.info(f"Cobrança de atualizações diárias executada por {interaction.user.id}")
+
+    @app_commands.command(name="apelidar", description="Define um apelido personalizado para um usuário registrado")
+    @app_commands.describe(
+        usuario="Usuário que receberá o apelido",
+        apelido="Apelido a ser definido para o usuário"
+    )
+    async def set_nickname(
+        self,
+        interaction: discord.Interaction,
+        usuario: discord.Member,
+        apelido: str
+    ):
+        """
+        Define um apelido personalizado para um usuário registrado no sistema.
+        Este apelido será usado em relatórios e outras áreas do sistema.
+
+        Args:
+            interaction: A interação do Discord.
+            usuario: O usuário que receberá o apelido.
+            apelido: O apelido a ser definido.
+        """
+        logger.debug(f"Comando apelidar iniciado para usuário={usuario.id}, apelido='{apelido}'")
+
+        admin_role_id = int(get_env("ADMIN_ROLE_ID"))
+        po_role_id = int(get_env("PO_ROLE_ID", "0"))
+
+        has_permission = False
+
+        if interaction.user.guild_permissions.administrator:
+            has_permission = True
+            logger.debug("Usuário tem permissão de administrador do servidor")
+
+        if admin_role_id != 0 and any(role.id == admin_role_id for role in interaction.user.roles):
+            has_permission = True
+            logger.debug("Usuário tem o cargo de admin")
+
+        if po_role_id != 0 and any(role.id == po_role_id for role in interaction.user.roles):
+            has_permission = True
+            logger.debug("Usuário tem o cargo de PO")
+
+        if not has_permission:
+            await interaction.response.send_message(
+                "⚠️ Você não tem permissão para usar este comando. Apenas administradores e POs podem definir apelidos.",
+                ephemeral=True
+            )
+            log_command("PERMISSÃO NEGADA", interaction.user, f"/apelidar usuario={usuario.id} apelido='{apelido}'")
+            logger.warning(f"Permissão negada para {interaction.user.name} (ID: {interaction.user.id}) no comando apelidar")
+            return
+
+        target_user = get_user(str(usuario.id))
+        if not target_user:
+            await interaction.response.send_message(
+                "⚠️ Este usuário não está registrado no sistema.",
+                ephemeral=True
+            )
+            log_command("ERRO", interaction.user, f"/apelidar usuario={usuario.id} apelido='{apelido}'", "Usuário não registrado")
+            logger.warning(f"Tentativa de definir apelido para usuário não registrado: {usuario.id}")
+            return
+
+        success, message = update_user_nickname(str(usuario.id), apelido, str(interaction.user.id))
+
+        if success:
+            embed = discord.Embed(
+                title="✅ Apelido Definido",
+                description=f"O apelido para {usuario.mention} foi definido como **{apelido}**.",
+                color=discord.Color.green()
+            )
+            embed.set_footer(text=f"Definido por {interaction.user.display_name}")
+
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            log_command("APELIDO", interaction.user, f"/apelidar usuario={usuario.id} apelido='{apelido}'", "Sucesso")
+            logger.info(f"Apelido '{apelido}' definido para {usuario.name} (ID: {usuario.id}) por {interaction.user.name} (ID: {interaction.user.id})")
+        else:
+            await interaction.response.send_message(
+                f"⚠️ Erro ao definir apelido: {message}",
+                ephemeral=True
+            )
+            log_command("ERRO", interaction.user, f"/apelidar usuario={usuario.id} apelido='{apelido}'", f"Erro: {message}")
+            logger.error(f"Erro ao definir apelido para usuário {usuario.id}: {message}")
+
+async def setup(bot: commands.Bot):
+    """
+    Configuração do módulo de comandos administrativos.
+
+    Args:
+        bot: O bot do Discord.
+    """
+    await bot.add_cog(AdminCommands(bot))
+    logger.info("Módulo de comandos administrativos carregado")
