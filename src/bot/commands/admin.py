@@ -11,7 +11,6 @@ from src.utils.config import get_env, log_command, get_br_time, BRAZIL_TIMEZONE,
 from src.storage.feature_toggle import is_feature_enabled, toggle_feature
 from src.storage.daily import get_missing_updates, clear_all_daily_updates
 from src.storage.users import check_user_is_po, register_user as reg_user, remove_user as rem_user, get_user
-from src.storage.time_tracking import get_all_users_records
 from src.storage.ignored_dates import get_all_ignored_dates, remove_ignored_date, should_ignore_date
 from src.bot.views import ConfigView
 
@@ -126,7 +125,6 @@ class AdminCommands(commands.Cog):
     @app_commands.command(name="toggle", description="Ativa/desativa funcionalidades do bot")
     @app_commands.describe(funcionalidade="Funcionalidade para ativar/desativar")
     @app_commands.choices(funcionalidade=[
-        app_commands.Choice(name="Sistema de ponto", value="ponto"),
         app_commands.Choice(name="Sistema de daily", value="daily"),
         app_commands.Choice(name="Cobrança de daily", value="daily_collection"),
     ])
@@ -168,167 +166,6 @@ class AdminCommands(commands.Cog):
 
         log_command("TOGGLE", interaction.user, f"/toggle funcionalidade={funcionalidade}",
                    f"Alterado de {was_enabled} para {new_state}")
-
-    @app_commands.command(name="folha-de-ponto", description="Mostra a folha de ponto de todos os usuários")
-    @app_commands.describe(periodo="Período para visualizar (hoje, semana, mes)")
-    @app_commands.choices(periodo=[
-        app_commands.Choice(name="Hoje", value="hoje"),
-        app_commands.Choice(name="Esta semana", value="semana"),
-        app_commands.Choice(name="Este mês", value="mes")
-    ])
-    async def timesheet(
-        self,
-        interaction: discord.Interaction,
-        periodo: str = "hoje"
-    ):
-        """Comando para visualizar a folha de ponto de todos os usuários."""
-        admin_role_id = int(get_env("ADMIN_ROLE_ID"))
-        has_permission = False
-
-        if admin_role_id == 0:
-            has_permission = interaction.user.guild_permissions.administrator
-        else:
-            has_permission = any(role.id == admin_role_id for role in interaction.user.roles)
-
-        if not has_permission:
-            await interaction.response.send_message(
-                "Você não tem permissão para usar este comando. Apenas administradores podem ver a folha de ponto.",
-                ephemeral=True
-            )
-            return
-
-        if not is_feature_enabled("ponto"):
-            await interaction.response.send_message(
-                "⚠️ O sistema de ponto está desativado no momento. "
-                "Você pode ativá-lo com o comando `/toggle funcionalidade=ponto`.",
-                ephemeral=True
-            )
-            return
-
-        today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-
-        if periodo == "hoje":
-            start_date = today.strftime("%Y-%m-%d")
-            end_date = today.strftime("%Y-%m-%d")
-            periodo_texto = "hoje"
-        elif periodo == "semana":
-            start_date = (today - timedelta(days=today.weekday())).strftime("%Y-%m-%d")
-            end_date = today.strftime("%Y-%m-%d")
-            periodo_texto = "esta semana"
-        elif periodo == "mes":
-            start_date = today.replace(day=1).strftime("%Y-%m-%d")
-            end_date = today.strftime("%Y-%m-%d")
-            periodo_texto = "este mês"
-
-        all_users_records = get_all_users_records(start_date, end_date)
-
-        if not all_users_records:
-            await interaction.response.send_message(
-                f"Não há registros de ponto para {periodo_texto}.",
-                ephemeral=True
-            )
-            return
-
-        await interaction.response.defer(ephemeral=True)
-
-        summary_embed = discord.Embed(
-            title=f"📊 Resumo - Folha de Ponto - {periodo_texto.capitalize()}",
-            description=f"Período: {start_date} a {end_date}",
-            color=discord.Color.blue()
-        )
-
-        all_embeds = []
-
-        for user_id, records in all_users_records.items():
-            try:
-                member = await interaction.guild.fetch_member(int(user_id))
-                user_name = member.display_name
-            except:
-                user_name = f"Usuário {user_id}"
-
-            total_seconds = 0
-            active_session = False
-
-            user_embed = discord.Embed(
-                title=f"📋 Detalhamento - {user_name}",
-                description=f"Período: {start_date} a {end_date}",
-                color=discord.Color.green()
-            )
-
-            records_text = []
-            for i, record in enumerate(records, 1):
-                clock_in_time = datetime.fromisoformat(record["clock_in"])
-
-                if record["clock_out"] is None:
-                    clock_out_str = "🟢 Em andamento"
-                    duration_str = "Em andamento"
-                    active_session = True
-                else:
-                    clock_out_time = datetime.fromisoformat(record["clock_out"])
-                    duration = clock_out_time - clock_in_time
-                    duration_seconds = duration.total_seconds()
-
-                    hours, remainder = divmod(int(duration_seconds), 3600)
-                    minutes, _ = divmod(remainder, 60)
-                    duration_str = f"{hours}h {minutes}min"
-
-                    clock_out_str = f"<t:{int(clock_out_time.timestamp())}:t>"
-
-                    total_seconds += duration_seconds
-
-                day_date = clock_in_time.strftime("%d/%m/%Y")
-
-                record_str = [
-                    f"**{day_date}** | Entrada: <t:{int(clock_in_time.timestamp())}:t> • "
-                    f"Saída: {clock_out_str} • "
-                    f"Duração: {duration_str}"
-                ]
-
-                if record.get("observation"):
-                    record_str.append(f"📝 *{record['observation']}*")
-
-                records_text.append("\n".join(record_str))
-
-            if records_text:
-                chunks = [records_text[i:i + 10] for i in range(0, len(records_text), 10)]
-
-                for i, chunk in enumerate(chunks):
-                    field_name = "Registros" if i == 0 else f"Registros (continuação {i})"
-                    user_embed.add_field(
-                        name=field_name,
-                        value="\n\n".join(chunk),
-                        inline=False
-                    )
-            else:
-                user_embed.add_field(
-                    name="Registros",
-                    value="Nenhum registro completo encontrado.",
-                    inline=False
-                )
-
-            total_hours, remainder = divmod(int(total_seconds), 3600)
-            total_minutes, _ = divmod(remainder, 60)
-
-            user_embed.add_field(
-                name="Total de Horas",
-                value=f"**{total_hours}h {total_minutes}min**",
-                inline=False
-            )
-
-            status = " 🟢" if active_session else ""
-            value = f"**Total: {total_hours}h {total_minutes}min**{status}"
-
-            summary_embed.add_field(
-                name=user_name,
-                value=value,
-                inline=True
-            )
-
-            all_embeds.append(user_embed)
-
-        all_embeds.insert(0, summary_embed)
-
-        await interaction.followup.send(embeds=all_embeds, ephemeral=True)
 
     @app_commands.command(name="limpar-resumos", description="Limpa todos os resumos diários do banco de dados (apenas para testes)")
     async def clear_daily_updates(self, interaction: discord.Interaction):

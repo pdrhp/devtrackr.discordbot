@@ -190,10 +190,9 @@ def get_missing_updates(for_date: Optional[str] = None) -> List[str]:
         yesterday = get_br_time() - timedelta(days=1)
         for_date = yesterday.strftime("%Y-%m-%d")
 
-    # Verifica se a data é um fim de semana (5=sábado, 6=domingo)
     check_date = datetime.strptime(for_date, "%Y-%m-%d")
     if check_date.weekday() >= 5:
-        return []  # Não cobra atualizações em finais de semana
+        return []
 
     team_members = get_users_by_role("teammember")
     team_member_ids = [tm['user_id'] for tm in team_members]
