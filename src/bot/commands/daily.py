@@ -345,41 +345,6 @@ class DailyCommands(commands.Cog):
                        "Nenhuma atualização encontrada")
             return
 
-        logger.debug(f"[DEBUG] Iniciando criação do workbook Excel...")
-        wb = Workbook()
-        ws = wb.active
-        ws.title = "Relatório Daily"
-
-        header_font = Font(bold=True, color="FFFFFF")
-        header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
-        subheader_font = Font(bold=True, color="000000")
-        subheader_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
-        date_fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
-        alt_row_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
-        border_bottom = Border(bottom=Side(style='thin'))
-        border_all = Border(top=Side(style='thin'), left=Side(style='thin'),
-                           right=Side(style='thin'), bottom=Side(style='thin'))
-
-        headers = ["Data", "Usuário", "Papel", "Atualização", "Enviado em"]
-        for col, header in enumerate(headers, 1):
-            cell = ws.cell(row=1, column=col)
-            cell.value = header
-            cell.font = header_font
-            cell.fill = header_fill
-            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-            cell.border = border_all
-
-        logger.debug(f"[DEBUG] Cabeçalhos da planilha configurados")
-
-        role_display = {
-            "teammember": "Team Member",
-            "po": "Product Owner"
-        }
-
-        row = 2
-        current_date = None
-        use_alt_color = False
-
         logger.debug(f"[DEBUG] Obtendo lista de todos os usuários")
         all_users = {}
         for role in ["teammember", "po"]:
@@ -388,26 +353,34 @@ class DailyCommands(commands.Cog):
                 all_users[user["user_id"]] = {
                     "role": role,
                     "name": get_user_display_name(user["user_id"], user),
-                    "user_obj": user  # Armazenar o objeto completo para uso posterior
+                    "user_obj": user
                 }
 
-        logger.debug(f"[DEBUG] Recuperados {len(all_users)} usuários no total")
+        unique_user_ids = set()
+        for user_id in all_updates.keys():
+            unique_user_ids.add(user_id)
+
+        discord_users = {}
+        logger.debug(f"[DEBUG] Pré-buscando {len(unique_user_ids)} usuários do Discord em lote")
+        for user_id in unique_user_ids:
+            try:
+                discord_user = await self.bot.fetch_user(int(user_id))
+                discord_users[user_id] = discord_user
+            except Exception as e:
+                logger.warning(f"[DEBUG] Não foi possível buscar usuário Discord {user_id}: {str(e)}")
+                discord_users[user_id] = None
 
         logger.debug(f"[DEBUG] Organizando atualizações para o relatório")
         sorted_updates = []
-
         try:
             for user_id, updates in all_updates.items():
-                logger.debug(f"[DEBUG] Processando {len(updates)} atualizações para o usuário {user_id}")
                 for update in updates:
                     sorted_updates.append({
                         'user_id': user_id,
                         'update': update
                     })
 
-            logger.debug(f"[DEBUG] Total de atualizações coletadas: {len(sorted_updates)}")
             sorted_updates.sort(key=lambda x: x['update']['report_date'], reverse=True)
-            logger.debug(f"[DEBUG] Atualizações ordenadas por data")
         except Exception as e:
             logger.error(f"[DEBUG] Erro ao processar atualizações: {str(e)}")
             await interaction.followup.send(
@@ -418,34 +391,86 @@ class DailyCommands(commands.Cog):
                       f"Erro ao processar dados: {str(e)}")
             return
 
+        logger.debug(f"[DEBUG] Iniciando criação do workbook Excel...")
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Relatório Daily"
+
+        header_font = Font(bold=True, color="FFFFFF")
+        header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+        subheader_font = Font(bold=True, color="000000")
+        subheader_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
+        alt_row_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
+        border_all = Border(top=Side(style='thin'), left=Side(style='thin'),
+                           right=Side(style='thin'), bottom=Side(style='thin'))
+
+        align_center = Alignment(horizontal="center", vertical="center")
+        align_left = Alignment(horizontal="left")
+        align_wrap = Alignment(wrap_text=True, vertical="top")
+
+        headers = ["Data", "Usuário", "Papel", "Atualização", "Enviado em"]
+        for col, header in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col)
+            cell.value = header
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = align_center
+            cell.border = border_all
+
+        column_widths = [15, 20, 15, 60, 18]
+        for i, width in enumerate(column_widths, 1):
+            ws.column_dimensions[get_column_letter(i)].width = width
+
+        ws.row_dimensions[1].height = 25
+
+        role_display = {
+            "teammember": "Team Member",
+            "po": "Product Owner"
+        }
+
+        row = 2
         logger.debug(f"[DEBUG] Preenchendo planilha com {len(sorted_updates)} atualizações")
-        for item in sorted_updates:
+
+        date_format_cache = {}
+        date_obj_cache = {}
+
+        even_rows = []
+        odd_rows = []
+        all_cells = []
+
+        for idx, item in enumerate(sorted_updates):
             try:
                 user_id = item['user_id']
                 update = item['update']
 
-                date_obj = datetime.strptime(update['report_date'], "%Y-%m-%d")
-                date_obj = date_obj.replace(tzinfo=BRAZIL_TIMEZONE)
-                formatted_date = date_obj.strftime("%d/%m/%Y")
+                report_date = update['report_date']
+                if report_date not in date_obj_cache:
+                    date_obj = datetime.strptime(report_date, "%Y-%m-%d")
+                    date_obj = date_obj.replace(tzinfo=BRAZIL_TIMEZONE)
+                    date_format_cache[report_date] = date_obj.strftime("%d/%m/%Y")
+                    date_obj_cache[report_date] = date_obj.date()
+                formatted_date = date_format_cache[report_date]
+                date_obj_value = date_obj_cache[report_date]
 
-                use_alt_color = not use_alt_color
-                row_fill = alt_row_fill if use_alt_color else None
+                is_even_row = (idx % 2 == 0)
+                if is_even_row:
+                    even_rows.append(row)
+                else:
+                    odd_rows.append(row)
 
-                try:
-                    user_obj = await self.bot.fetch_user(int(user_id))
-                    discord_name = user_obj.display_name
+                discord_user = discord_users.get(user_id)
+                user_data = all_users.get(user_id, {})
+                stored_user_obj = user_data.get("user_obj")
 
-                    user_data = all_users.get(user_id, {})
-                    stored_user_obj = user_data.get("user_obj")
-
+                if discord_user:
+                    discord_name = discord_user.display_name
                     if stored_user_obj:
                         user_name = get_user_display_name(user_id, stored_user_obj)
                         if user_name != discord_name:
                             user_name = f"{discord_name} ({user_name})"
                     else:
                         user_name = discord_name
-                except Exception as e:
-                    logger.warning(f"[DEBUG] Não foi possível buscar usuário Discord {user_id}: {str(e)}")
+                else:
                     user_name = all_users.get(user_id, {}).get("name", f"Usuário {user_id}")
 
                 user_role = all_users.get(user_id, {}).get("role", "")
@@ -455,61 +480,64 @@ class DailyCommands(commands.Cog):
                 submitted_at = submitted_at.astimezone(BRAZIL_TIMEZONE)
                 formatted_submit_time = submitted_at.strftime("%d/%m/%Y %H:%M")
 
-                ws.cell(row=row, column=1, value=formatted_date).alignment = Alignment(horizontal="center")
-                ws.cell(row=row, column=2, value=user_name).alignment = Alignment(horizontal="left")
-                ws.cell(row=row, column=3, value=role_name).alignment = Alignment(horizontal="center")
+                submitted_at_no_tz = submitted_at.replace(tzinfo=None)
 
-                content_cell = ws.cell(row=row, column=4, value=update['content'])
-                content_cell.alignment = Alignment(wrap_text=True, vertical="top")
-
-                ws.cell(row=row, column=5, value=formatted_submit_time).alignment = Alignment(horizontal="center")
+                ws.cell(row=row, column=1, value=date_obj_value)
+                ws.cell(row=row, column=2, value=user_name)
+                ws.cell(row=row, column=3, value=role_name)
+                ws.cell(row=row, column=4, value=update['content'])
+                ws.cell(row=row, column=5, value=submitted_at_no_tz)
 
                 for col in range(1, 6):
-                    cell = ws.cell(row=row, column=col)
-                    cell.border = border_all
-                    if row_fill:
-                        cell.fill = row_fill
+                    all_cells.append(ws.cell(row=row, column=col))
 
                 row += 1
             except Exception as e:
                 logger.error(f"[DEBUG] Erro ao processar linha {row-1}: {str(e)}")
+
+        logger.debug(f"[DEBUG] Aplicando formatações em lote")
+
+        for cell in all_cells:
+            cell.border = border_all
+
+        for r in range(2, row):
+            date_cell = ws.cell(row=r, column=1)
+            date_cell.alignment = align_center
+            date_cell.number_format = "DD/MM/YYYY"
+
+            time_cell = ws.cell(row=r, column=5)
+            time_cell.alignment = align_center
+            time_cell.number_format = "DD/MM/YYYY HH:MM"
+    
+            ws.cell(row=r, column=2).alignment = align_left
+            ws.cell(row=r, column=3).alignment = align_center
+            ws.cell(row=r, column=4).alignment = align_wrap
+
+        for r in odd_rows:
+            for c in range(1, 6):
+                ws.cell(row=r, column=c).fill = alt_row_fill
 
         logger.debug(f"[DEBUG] Finalizando formatação da planilha")
         try:
             ws.auto_filter.ref = f"A1:E{row-1}"
             ws.freeze_panes = 'A2'
 
-            column_widths = [15, 20, 15, 60, 18]
-            for i, width in enumerate(column_widths, 1):
-                ws.column_dimensions[get_column_letter(i)].width = width
-
-            ws.row_dimensions[1].height = 25
-
-            row += 2
-
-            ws.cell(row=row, column=1, value="Resumo do Relatório").font = Font(bold=True, size=12)
-            ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=5)
-            row += 1
+            summary_row = row + 2
+            ws.cell(row=summary_row, column=1, value="Resumo do Relatório").font = Font(bold=True, size=12)
+            ws.merge_cells(start_row=summary_row, start_column=1, end_row=summary_row, end_column=5)
+            summary_row += 1
 
             summary_headers = ["Estatísticas", "Valor"]
             for col, header in enumerate(summary_headers, 1):
-                cell = ws.cell(row=row, column=col)
+                cell = ws.cell(row=summary_row, column=col)
                 cell.value = header
                 cell.font = subheader_font
                 cell.fill = subheader_fill
                 cell.border = border_all
-                cell.alignment = Alignment(horizontal="center")
-            row += 1
+                cell.alignment = align_center
+            summary_row += 1
 
-            unique_users = set()
-            update_counts = {}
-            for item in sorted_updates:
-                user_id = item['user_id']
-                update_date = item['update']['report_date']
-                unique_users.add(user_id)
-                if update_date not in update_counts:
-                    update_counts[update_date] = 0
-                update_counts[update_date] += 1
+            unique_users = set(item['user_id'] for item in sorted_updates)
 
             summary_data = [
                 ["Período do relatório", f"{start_date} a {end_date}"],
@@ -519,11 +547,10 @@ class DailyCommands(commands.Cog):
             ]
 
             for item in summary_data:
-                ws.cell(row=row, column=1, value=item[0]).border = border_all
-                ws.cell(row=row, column=2, value=item[1]).border = border_all
-                row += 1
+                ws.cell(row=summary_row, column=1, value=item[0]).border = border_all
+                ws.cell(row=summary_row, column=2, value=item[1]).border = border_all
+                summary_row += 1
 
-            logger.debug(f"[DEBUG] Resumo do relatório adicionado à planilha")
         except Exception as e:
             logger.error(f"[DEBUG] Erro ao formatar planilha: {str(e)}")
 
