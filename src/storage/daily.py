@@ -7,6 +7,8 @@ from src.storage.database import get_connection
 from src.storage.users import get_user, get_users_by_role
 from src.utils.config import get_br_time, BRAZIL_TIMEZONE
 
+logger = logging.getLogger('team_analysis_bot')
+
 
 def submit_daily_update(user_id: str, content: str, report_date: Optional[str] = None) -> Tuple[bool, str]:
     """
@@ -119,7 +121,6 @@ def get_all_daily_updates(start_date: Optional[str] = None, end_date: Optional[s
     Returns:
         Dict[str, List[Dict[str, Any]]]: Dicionário com IDs dos usuários como chaves e listas de atualizações como valores.
     """
-    logger = logging.getLogger('team_analysis_commands')
     logger.debug(f"[DEBUG] get_all_daily_updates: Iniciando busca para período {start_date} a {end_date}")
 
     conn = get_connection()
@@ -179,6 +180,7 @@ def get_missing_updates(for_date: Optional[str] = None) -> List[str]:
     """
     Obtém lista de IDs de usuários do tipo 'teammember' que não enviaram atualização para a data especificada.
     Finais de semana (sábado e domingo) são automaticamente ignorados.
+    Quando a verificação é feita em uma segunda-feira, a função verifica a sexta-feira anterior.
 
     Args:
         for_date (Optional[str]): Data para verificar no formato YYYY-MM-DD. Se None, usa o dia anterior.
@@ -188,10 +190,23 @@ def get_missing_updates(for_date: Optional[str] = None) -> List[str]:
     """
     if not for_date:
         yesterday = get_br_time() - timedelta(days=1)
+        today_weekday = get_br_time().weekday()
+        yesterday_weekday = yesterday.weekday()
+
+        logger.info(f"Verificando atualizações pendentes: hoje é dia {get_br_time().strftime('%Y-%m-%d')} (weekday={today_weekday}), verificando dia {yesterday.strftime('%Y-%m-%d')} (weekday={yesterday_weekday})")
+
+        if yesterday.weekday() == 6:
+            yesterday = get_br_time() - timedelta(days=3)
+            logger.info(f"Dia anterior é domingo, verificando sexta-feira: {yesterday.strftime('%Y-%m-%d')}")
+        elif yesterday.weekday() == 5:
+            yesterday = get_br_time() - timedelta(days=2)
+            logger.info(f"Dia anterior é sábado, verificando sexta-feira: {yesterday.strftime('%Y-%m-%d')}")
+
         for_date = yesterday.strftime("%Y-%m-%d")
 
     check_date = datetime.strptime(for_date, "%Y-%m-%d")
     if check_date.weekday() >= 5:
+        logger.info(f"Data {for_date} é um final de semana (weekday={check_date.weekday()}), retornando lista vazia")
         return []
 
     team_members = get_users_by_role("teammember")
