@@ -294,3 +294,52 @@ def has_submitted_daily_update(user_id: str, report_date: Optional[str] = None) 
 
     finally:
         conn.close()
+
+
+def get_missing_dates_for_user(user_id: str, days_back: int = 30) -> List[str]:
+    """
+    Obtém as datas dos últimos N dias que o usuário não enviou atualização diária.
+    Finais de semana e datas configuradas para serem ignoradas são excluídos.
+
+    Args:
+        user_id (str): ID do usuário no Discord.
+        days_back (int): Número de dias para verificar, contando a partir de ontem.
+
+    Returns:
+        List[str]: Lista de datas (YYYY-MM-DD) que estão pendentes.
+    """
+    from src.storage.ignored_dates import should_ignore_date
+
+    user = get_user(user_id)
+    if not user:
+        return []
+
+    days_back = min(90, days_back)
+
+    today = get_br_time().date()
+    yesterday = today - timedelta(days=1)
+    start_date = today - timedelta(days=days_back)
+
+    user_updates = get_user_daily_updates(
+        user_id,
+        start_date=start_date.strftime("%Y-%m-%d"),
+        end_date=yesterday.strftime("%Y-%m-%d")
+    )
+
+    updated_dates = {update['report_date'] for update in user_updates}
+
+    missing_dates = []
+    current_date = start_date
+
+    while current_date <= yesterday:
+        date_str = current_date.strftime("%Y-%m-%d")
+
+        is_weekday = current_date.weekday() < 5
+        should_check = is_weekday and not should_ignore_date(current_date)
+
+        if should_check and date_str not in updated_dates:
+            missing_dates.append(date_str)
+
+        current_date += timedelta(days=1)
+
+    return missing_dates

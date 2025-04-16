@@ -2,6 +2,7 @@ import logging
 from typing import Dict, List, Optional
 import asyncio
 from datetime import datetime, timedelta
+import os
 
 import discord
 from discord import app_commands, ui
@@ -9,7 +10,7 @@ from discord.ext import commands
 
 from src.utils.config import get_env, log_command, get_br_time, BRAZIL_TIMEZONE, parse_date_string, format_date_for_display
 from src.storage.feature_toggle import is_feature_enabled, toggle_feature
-from src.storage.daily import get_missing_updates, clear_all_daily_updates
+from src.storage.daily import get_missing_updates, clear_all_daily_updates, get_missing_dates_for_user
 from src.storage.users import check_user_is_po, register_user as reg_user, remove_user as rem_user, get_user, update_user_nickname
 from src.storage.ignored_dates import get_all_ignored_dates, remove_ignored_date, should_ignore_date
 from src.bot.views import ConfigView
@@ -859,6 +860,125 @@ class AdminCommands(commands.Cog):
             )
             log_command("ERRO", interaction.user, f"/apelidar usuario={usuario.id} apelido='{apelido}'", f"Erro: {message}")
             logger.error(f"Erro ao definir apelido para usuário {usuario.id}: {message}")
+
+    @app_commands.command(name="pendencias-daily", description="Verifica as pendências de daily de um usuário específico")
+    @app_commands.describe(
+        usuario="Usuário para verificar as pendências",
+        periodo="Período em dias para verificar (padrão: 30, máximo: 90)"
+    )
+    async def check_user_missing_dailies(
+        self,
+        interaction: discord.Interaction,
+        usuario: discord.User,
+        periodo: Optional[int] = 30
+    ):
+        """
+        Verifica quais dias um usuário específico está pendente de enviar daily updates.
+
+        Args:
+            interaction: A interação do Discord.
+            usuario: O usuário para verificar.
+            periodo: Quantidade de dias para verificar (máx: 90 dias, ~3 meses).
+        """
+        if not await self._check_daily_collection_enabled(interaction):
+            return
+
+        admin_role_id = int(get_env("ADMIN_ROLE_ID"))
+        has_permission = False
+
+        if admin_role_id == 0:
+            has_permission = interaction.user.guild_permissions.administrator
+        else:
+            has_permission = any(role.id == admin_role_id for role in interaction.user.roles)
+
+        user = get_user(str(interaction.user.id))
+        if user and user['role'] == 'po':
+            has_permission = True
+
+        if not has_permission:
+            await interaction.response.send_message(
+                "⚠️ Você não tem permissão para usar este comando. Apenas administradores e Product Owners podem verificar pendências.",
+                ephemeral=True
+            )
+            log_command("PERMISSÃO NEGADA", interaction.user, f"/pendencias-daily usuario={usuario.name} periodo={periodo}")
+            return
+
+        if periodo <= 0:
+            await interaction.response.send_message(
+                "⚠️ O período deve ser um número positivo de dias.",
+                ephemeral=True
+            )
+            log_command("ERRO", interaction.user, f"/pendencias-daily usuario={usuario.name} periodo={periodo}", "Período inválido")
+            return
+
+        if periodo > 90:
+            periodo = 90
+            await interaction.response.send_message(
+                "ℹ️ O período máximo permitido é de 90 dias. Seu pedido foi ajustado para 90 dias.",
+                ephemeral=True
+            )
+            log_command("INFO", interaction.user, f"/pendencias-daily usuario={usuario.name} periodo={periodo}", "Período ajustado para 90 dias")
+
+        target_user = get_user(str(usuario.id))
+        if not target_user:
+            await interaction.response.send_message(
+                f"⚠️ O usuário {usuario.mention} não está registrado no sistema.",
+                ephemeral=True
+            )
+            log_command("ERRO", interaction.user, f"/pendencias-daily usuario={usuario.name} periodo={periodo}", "Usuário não registrado")
+            return
+
+        await interaction.response.defer(thinking=True)
+
+        missing_dates = get_missing_dates_for_user(str(usuario.id), periodo)
+
+        if not missing_dates:
+            await interaction.followup.send(
+                f"✅ O usuário {usuario.mention} não tem pendências de daily nos últimos {periodo} dias! 🎉",
+                ephemeral=True
+            )
+            log_command("INFO", interaction.user, f"/pendencias-daily usuario={usuario.name} periodo={periodo}", "Nenhuma pendência encontrada")
+            return
+
+        missing_dates.sort(reverse=True)
+
+        formatted_dates = []
+        today = get_br_time().date()
+
+        for date_str in missing_dates:
+            date_obj = datetime.strptime(date_str, "%Y-%m-%d").date()
+            days_ago = (today - date_obj).days
+
+            if days_ago == 1:
+                day_text = "ontem"
+            else:
+                day_text = f"há {days_ago} dias"
+
+            formatted_date = date_obj.strftime("%d/%m/%Y")
+            weekday_name = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"][date_obj.weekday()]
+
+            formatted_dates.append(f"• **{formatted_date}** ({weekday_name}) - {day_text}")
+
+        embed = discord.Embed(
+            title=f"📊 Pendências de Daily - {usuario.display_name}",
+            description=f"Nos últimos {periodo} dias, foram encontradas **{len(missing_dates)}** pendências de daily:",
+            color=discord.Color.gold()
+        )
+
+        chunks = [formatted_dates[i:i+10] for i in range(0, len(formatted_dates), 10)]
+
+        for i, chunk in enumerate(chunks):
+            embed.add_field(
+                name=f"Datas pendentes {i+1}" if i > 0 else "Datas pendentes",
+                value="\n".join(chunk),
+                inline=False
+            )
+
+        embed.set_footer(text=f"Verificação realizada em {get_br_time().strftime('%d/%m/%Y %H:%M')}")
+
+        await interaction.followup.send(embed=embed, ephemeral=True)
+        log_command("CONSULTA", interaction.user, f"/pendencias-daily usuario={usuario.name} periodo={periodo}",
+                  f"Encontradas {len(missing_dates)} pendências")
 
 async def setup(bot: commands.Bot):
     """
