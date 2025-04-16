@@ -1099,13 +1099,12 @@ class AdminCommands(commands.Cog):
                     if nickname is None:
                         nickname = ""
 
-                    display_name = nickname if nickname else f"User {user_id}"
-
                     try:
                         discord_user = await self.bot.fetch_user(int(user_id))
                         user_mention = discord_user.mention
+                        display_name = nickname if nickname else discord_user.display_name
                     except Exception as e:
-                        user_mention = display_name
+                        user_mention = display_name = f"User {user_id}"
                         logger.error(f"[pendencias-equipe] Erro ao buscar usuário Discord: {str(e)}")
 
                     user_updates = all_daily_updates.get(user_id, [])
