@@ -10,8 +10,8 @@ from discord.ext import commands
 
 from src.utils.config import get_env, log_command, get_br_time, BRAZIL_TIMEZONE, parse_date_string, format_date_for_display
 from src.storage.feature_toggle import is_feature_enabled, toggle_feature
-from src.storage.daily import get_missing_updates, clear_all_daily_updates, get_missing_dates_for_user
-from src.storage.users import check_user_is_po, register_user as reg_user, remove_user as rem_user, get_user, update_user_nickname
+from src.storage.daily import get_missing_updates, clear_all_daily_updates, get_missing_dates_for_user, get_user_daily_updates, get_all_daily_updates
+from src.storage.users import check_user_is_po, register_user as reg_user, remove_user as rem_user, get_user, update_user_nickname, get_all_users
 from src.storage.ignored_dates import get_all_ignored_dates, remove_ignored_date, should_ignore_date
 from src.bot.views import ConfigView
 
@@ -979,6 +979,233 @@ class AdminCommands(commands.Cog):
         await interaction.followup.send(embed=embed, ephemeral=True)
         log_command("CONSULTA", interaction.user, f"/pendencias-daily usuario={usuario.name} periodo={periodo}",
                   f"Encontradas {len(missing_dates)} pendências")
+
+    @app_commands.command(name="pendencias-equipe", description="Verifica as pendências de daily de todos os membros da equipe")
+    @app_commands.describe(
+        periodo="Período em dias para verificar (padrão: 30, máximo: 90)"
+    )
+    async def check_team_missing_dailies(
+        self,
+        interaction: discord.Interaction,
+        periodo: Optional[int] = 30
+    ):
+        logger.debug(f"[pendencias-equipe] Iniciando comando com periodo={periodo}")
+
+        if not await self._check_daily_collection_enabled(interaction):
+            logger.debug("[pendencias-equipe] Funcionalidade de cobrança de daily desativada")
+            return
+
+        admin_role_id = int(get_env("ADMIN_ROLE_ID"))
+        has_permission = False
+
+        if admin_role_id == 0:
+            has_permission = interaction.user.guild_permissions.administrator
+        else:
+            has_permission = any(role.id == admin_role_id for role in interaction.user.roles)
+
+        user = get_user(str(interaction.user.id))
+        if user and user['role'] == 'po':
+            has_permission = True
+
+        logger.debug(f"[pendencias-equipe] Verificação de permissão: {has_permission}")
+
+        if not has_permission:
+            await interaction.response.send_message(
+                "⚠️ Você não tem permissão para usar este comando. Apenas administradores e Product Owners podem verificar pendências.",
+                ephemeral=True
+            )
+            log_command("PERMISSÃO NEGADA", interaction.user, f"/pendencias-equipe periodo={periodo}")
+            return
+
+        if periodo <= 0:
+            await interaction.response.send_message(
+                "⚠️ O período deve ser um número positivo de dias.",
+                ephemeral=True
+            )
+            log_command("ERRO", interaction.user, f"/pendencias-equipe periodo={periodo}", "Período inválido")
+            return
+
+        if periodo > 90:
+            periodo = 90
+            await interaction.response.send_message(
+                "ℹ️ O período máximo permitido é de 90 dias. Seu pedido foi ajustado para 90 dias.",
+                ephemeral=True
+            )
+            log_command("INFO", interaction.user, f"/pendencias-equipe periodo={periodo}", "Período ajustado para 90 dias")
+
+        logger.debug("[pendencias-equipe] Enviando resposta defer")
+        await interaction.response.defer(thinking=True)
+        logger.debug("[pendencias-equipe] Resposta defer enviada")
+
+        try:
+            logger.debug("[pendencias-equipe] Iniciando pré-carregamento de dados")
+
+            logger.debug("[pendencias-equipe] Obtendo todos os usuários")
+            all_users = get_all_users()
+            logger.debug(f"[pendencias-equipe] Total de usuários obtidos: {len(all_users) if all_users else 0}")
+
+            if not all_users:
+                await interaction.followup.send(
+                    "⚠️ Não há usuários registrados no sistema.",
+                    ephemeral=True
+                )
+                log_command("INFO", interaction.user, f"/pendencias-equipe periodo={periodo}", "Nenhum usuário registrado")
+                return
+
+            logger.debug("[pendencias-equipe] Filtrando membros da equipe")
+            team_members = [user for user in all_users if user.get('role') == 'teammember']
+            logger.debug(f"[pendencias-equipe] Total de membros da equipe: {len(team_members)}")
+
+            if not team_members:
+                await interaction.followup.send(
+                    "⚠️ Não há membros da equipe registrados no sistema.",
+                    ephemeral=True
+                )
+                log_command("INFO", interaction.user, f"/pendencias-equipe periodo={periodo}", "Nenhum membro da equipe registrado")
+                return
+
+            today = get_br_time().date()
+            yesterday = today - timedelta(days=1)
+            start_date = today - timedelta(days=periodo)
+
+            logger.debug(f"[pendencias-equipe] Pré-carregando atualizações diárias de {start_date.strftime('%Y-%m-%d')} a {yesterday.strftime('%Y-%m-%d')}")
+            all_daily_updates = get_all_daily_updates(
+                start_date=start_date.strftime("%Y-%m-%d"),
+                end_date=yesterday.strftime("%Y-%m-%d")
+            )
+            logger.debug(f"[pendencias-equipe] Atualizações diárias carregadas para {len(all_daily_updates)} usuários")
+
+            valid_dates = []
+            current_date = start_date
+            from src.storage.ignored_dates import should_ignore_date
+
+            while current_date <= yesterday:
+                date_str = current_date.strftime("%Y-%m-%d")
+                is_weekday = current_date.weekday() < 5
+                should_check = is_weekday and not should_ignore_date(current_date)
+
+                if should_check:
+                    valid_dates.append(date_str)
+
+                current_date += timedelta(days=1)
+
+            logger.debug(f"[pendencias-equipe] Datas válidas para verificação: {len(valid_dates)}")
+
+            async def process_team_member(member):
+                try:
+                    user_id = member.get('user_id')
+                    nickname = member.get('nickname', '')
+
+                    if nickname is None:
+                        nickname = ""
+
+                    display_name = nickname if nickname else f"User {user_id}"
+
+                    try:
+                        discord_user = await self.bot.fetch_user(int(user_id))
+                        user_mention = discord_user.mention
+                    except Exception as e:
+                        user_mention = display_name
+                        logger.error(f"[pendencias-equipe] Erro ao buscar usuário Discord: {str(e)}")
+
+                    user_updates = all_daily_updates.get(user_id, [])
+                    updated_dates = {update['report_date'] for update in user_updates}
+
+                    missing_dates = [date for date in valid_dates if date not in updated_dates]
+
+                    if missing_dates:
+                        missing_dates.sort(reverse=True)
+
+                        formatted_dates = []
+                        for date_str in missing_dates[:5]:
+                            date_obj = datetime.strptime(date_str, "%Y-%m-%d").date()
+                            formatted_date = date_obj.strftime("%d/%m/%Y")
+                            formatted_dates.append(formatted_date)
+
+                        date_list = ", ".join([f"**{date}**" for date in formatted_dates])
+
+                        if len(missing_dates) > 5:
+                            date_list += f" e mais {len(missing_dates) - 5} datas..."
+
+                        return {
+                            'user_id': user_id,
+                            'display_name': display_name,
+                            'user_mention': user_mention,
+                            'missing_dates': missing_dates,
+                            'date_list': date_list,
+                            'count': len(missing_dates),
+                            'has_pending': True
+                        }
+
+                    return {
+                        'user_id': user_id,
+                        'has_pending': False
+                    }
+
+                except Exception as e:
+                    logger.error(f"[pendencias-equipe] Erro ao processar membro {user_id}: {str(e)}")
+                    logger.exception(e)
+                    return {
+                        'user_id': user_id,
+                        'has_pending': False,
+                        'error': str(e)
+                    }
+
+            logger.debug("[pendencias-equipe] Iniciando processamento paralelo de todos os membros simultaneamente")
+
+            all_results = await asyncio.gather(*[process_team_member(member) for member in team_members])
+
+            logger.debug(f"[pendencias-equipe] Processamento paralelo concluído para {len(all_results)} membros")
+
+            members_with_pending = [result for result in all_results if result.get('has_pending', False)]
+            users_with_pending = len(members_with_pending)
+            total_pending = sum(member['count'] for member in members_with_pending)
+
+            logger.debug(f"[pendencias-equipe] Membros com pendências: {users_with_pending}, total de pendências: {total_pending}")
+
+            members_with_pending.sort(key=lambda x: x['count'], reverse=True)
+
+            embed = discord.Embed(
+                title="📊 Pendências de Daily - Equipe",
+                description=f"Relatório de pendências dos últimos {periodo} dias para todos os membros da equipe:",
+                color=discord.Color.gold()
+            )
+
+            for member_data in members_with_pending:
+                embed.add_field(
+                    name=f"{member_data['display_name']} ({member_data['count']} pendências)",
+                    value=f"{member_data['user_mention']}\nDatas: {member_data['date_list']}",
+                    inline=False
+                )
+
+            if users_with_pending == 0:
+                embed.add_field(
+                    name="Parabéns! 🎉",
+                    value="Todos os membros da equipe estão com suas atualizações diárias em dia!",
+                    inline=False
+                )
+            else:
+                embed.description += f"\n\n**Resumo:** {users_with_pending} membros com pendências, totalizando {total_pending} atualizações não enviadas."
+
+            embed.set_footer(text=f"Verificação realizada em {get_br_time().strftime('%d/%m/%Y %H:%M')}")
+
+            logger.debug("[pendencias-equipe] Enviando resposta final")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            logger.debug("[pendencias-equipe] Resposta enviada com sucesso")
+            log_command("CONSULTA", interaction.user, f"/pendencias-equipe periodo={periodo}",
+                      f"Verificados {len(team_members)} membros, {users_with_pending} com pendências")
+
+        except Exception as e:
+            logger.error(f"[pendencias-equipe] ERRO CRÍTICO: {str(e)}")
+            logger.exception(e)
+            try:
+                await interaction.followup.send(
+                    f"❌ Ocorreu um erro ao processar o comando: {str(e)}",
+                    ephemeral=True
+                )
+            except:
+                logger.error("[pendencias-equipe] Não foi possível enviar mensagem de erro")
+                pass
 
 async def setup(bot: commands.Bot):
     """
