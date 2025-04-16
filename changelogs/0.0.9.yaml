@@ -1,0 +1,27 @@
+version: "0.0.9"
+release_date: "2025-04-17"
+title: "Melhorias no Sistema de Daily e Otimização de Performance - Versão 0.0.9"
+description: "Esta versão implementa melhorias significativas no sistema de cobrança de daily, adiciona novos comandos para verificação de pendências, e otimiza o desempenho das consultas para gerar relatórios."
+
+changes:
+  adicionado:
+    - "Novo comando /pendencias-daily para verificar pendências de atualizações diárias de um usuário específico"
+    - "Novo comando /pendencias-equipe para listar todos os membros com pendências, ordenados por quantidade (mais pendências primeiro)"
+    - "Suporte para exibir nomes de usuário do Discord quando não há nickname configurado no sistema"
+
+  melhorado:
+    - "Otimização significativa das consultas para gerar relatórios de pendências, utilizando processamento paralelo"
+    - "Implementação de pré-carregamento de dados para reduzir consultas ao banco de dados"
+    - "Processamento paralelo real de todos os membros simultaneamente ao gerar relatórios"
+    - "Melhor exibição dos nomes de usuários nos relatórios, priorizando nicknames configurados ou nomes do Discord"
+
+  corrigido:
+    - "Correção do bug na verificação de daily nas segundas-feiras, onde o sistema agora verifica corretamente a sexta-feira anterior"
+    - "Tratamento adequado para usuários com nickname null, evitando erros durante a geração de relatórios"
+    - "Melhoria no tratamento de erros durante o processamento de membros da equipe"
+
+notes: |
+  Os novos comandos de verificação de pendências fornecem ferramentas poderosas para a gerência acompanhar o cumprimento das atualizações diárias pela equipe.
+  A otimização de performance reduz significativamente o tempo de resposta ao gerar relatórios, especialmente para equipes maiores.
+
+  O suporte para exibir nomes de usuário do Discord quando não há nickname configurado melhora a usabilidade ao identificar facilmente os membros nos relatórios.
