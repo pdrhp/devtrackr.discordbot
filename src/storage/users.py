@@ -172,6 +172,44 @@ def get_users_by_role(role: str) -> List[Dict[str, Any]]:
         logger.debug("Conexão com o banco de dados fechada")
 
 
+def get_all_users() -> List[Dict[str, Any]]:
+    """
+    Obtém todos os usuários registrados no sistema.
+
+    Returns:
+        List[Dict[str, Any]]: Lista de todos os usuários.
+    """
+    logger = logging.getLogger('team_analysis_bot')
+
+    logger.debug("Iniciando busca de todos os usuários")
+
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    try:
+        logger.debug("Executando consulta para obter todos os usuários")
+        cursor.execute("SELECT * FROM users")
+        users = cursor.fetchall()
+
+        if users:
+            logger.debug(f"Encontrados {len(users)} usuários no total")
+        else:
+            logger.debug("Nenhum usuário encontrado no sistema")
+
+        result = [dict(user) for user in users]
+        logger.debug(f"Lista convertida para dicionários com {len(result)} itens")
+
+        return result
+
+    except sqlite3.Error as e:
+        logger.error(f"Erro ao buscar todos os usuários: {str(e)}")
+        return []
+
+    finally:
+        conn.close()
+        logger.debug("Conexão com o banco de dados fechada")
+
+
 def remove_user(user_id: str) -> Tuple[bool, str]:
     """
     Remove um usuário do sistema.
